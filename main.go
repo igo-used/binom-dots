@@ -141,7 +141,7 @@ func main() {
 	}
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Panic(err) // This is how you were handling the error earlier in your code
+		log.Panic(err)
 	}
 
 	bot.Debug = true
@@ -177,7 +177,8 @@ func main() {
 					"Commands:\n" +
 					"/checkin - Get 10 dots daily\n" +
 					"/share - Get 20 dots for sharing\n" +
-					"/balance - Check your dots balance"
+					"/balance - Check your dots balance\n" +
+					"/id - Get your Telegram ID for the website"
 			case "/checkin":
 				if canClaimDaily(userID) {
 					dots := awardDailyDots(userID, username)
@@ -195,8 +196,27 @@ func main() {
 			case "/balance":
 				dots := getUserDots(userID)
 				msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+			case "/id":
+				msg.Text = fmt.Sprintf("Your Telegram ID is: %d\n\nUse this ID to connect on our website: https://dbotblock29.site", userID)
+			case "/help":
+				msg.Text = "📚 *Binom Dots Bot Commands*\n\n" +
+					"*/start* - Welcome message and introduction\n" +
+					"*/checkin* - Claim your daily 10 dots reward\n" +
+					"*/share* - Get 20 dots for sharing (once per day)\n" +
+					"*/balance* - Check your current dots balance\n" +
+					"*/id* - Get your Telegram ID for the website\n" +
+					"*/help* - Show this help message"
+				msg.ParseMode = "Markdown"
+			case "/info":
+				msg.Text = "ℹ️ *About Binom Dots*\n\n" +
+					"Binom Dots is a rewards program by Binomena Blockchain.\n\n" +
+					"• Collect dots daily by checking in and sharing\n" +
+					"• 1000 dots = 1 token when our blockchain launches\n" +
+					"• Visit our website: https://dbotblock29.site\n\n" +
+					"Powered by ADA Neural technology"
+				msg.ParseMode = "Markdown"
 			default:
-				msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
+				msg.Text = "I don't understand that command. Try /start, /checkin, /share, /balance, or /help."
 			}
 
 			if _, err := bot.Send(msg); err != nil {
@@ -204,56 +224,6 @@ func main() {
 			}
 		}
 	}()
-
-	// Comment out the webhook handler
-	// http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
-	// 	update, err := bot.HandleUpdate(r)
-	// 	if err != nil {
-	// 		log.Println(err)
-	// 		return
-	// 	}
-
-	// 	if update.Message == nil {
-	// 		return
-	// 	}
-
-	// 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-	// 	userID := update.Message.From.ID
-	// 	username := update.Message.From.UserName
-
-	// 	switch update.Message.Text {
-	// 	case "/start":
-	// 		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-	// 			"Earn dots daily and exchange them for tokens later.\n\n" +
-	// 			"Commands:\n" +
-	// 			"/checkin - Get 10 dots daily\n" +
-	// 			"/share - Get 20 dots for sharing\n" +
-	// 			"/balance - Check your dots balance"
-	// 	case "/checkin":
-	// 		if canClaimDaily(userID) {
-	// 			dots := awardDailyDots(userID, username)
-	// 			msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-	// 		} else {
-	// 			msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
-	// 		}
-	// 	case "/share":
-	// 		if canClaimShareReward(userID) {
-	// 			dots := awardShareDots(userID, username)
-	// 			msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-	// 		} else {
-	// 			msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
-	// 		}
-	// 	case "/balance":
-	// 		dots := getUserDots(userID)
-	// 		msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-	// 	default:
-	// 		msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-	// 	}
-
-	// 	if _, err := bot.Send(msg); err != nil {
-	// 		log.Println(err)
-	// 	}
-	// })
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
@@ -284,6 +254,47 @@ func main() {
 		if !exists {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(user)
+	})
+
+	// API endpoint for user creation
+	http.HandleFunc("/api/user/create", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		userIDStr := r.URL.Query().Get("id")
+		if userIDStr == "" {
+			http.Error(w, "Missing user ID", http.StatusBadRequest)
+			return
+		}
+
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		// Create a new user if they don't exist
+		user, exists := users[userID]
+		if !exists {
+			user = &User{
+				ID:       userID,
+				Username: "web_user", // Default username for web users
+				Dots:     0,
+			}
+			users[userID] = user
+			saveUsers() // Save to persistent storage
 		}
 
 		w.Header().Set("Content-Type", "application/json")
