@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Binom Dots</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0-beta3/css/all.min.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <div class="logo-container">
+                <img src="logo.svg" alt="Binom Dots Logo" class="logo">
+            </div>
+            <h1>Binom Dots</h1>
+            <p class="tagline">Collect daily rewards, build your future</p>
+        </header>
+
+        <div class="hero-section">
+            <div class="hero-content">
+                <h2>Join Our Community</h2>
+                <p>Earn dots daily and be part of our growing blockchain ecosystem. Your dots will be exchangeable for tokens in the future.</p>
+                <div class="hero-stats">
+                    <div class="stat-item">
+                        <span class="stat-value">1000</span>
+                        <span class="stat-label">Dots</span>
+                    </div>
+                    <div class="stat-divider">=</div>
+                    <div class="stat-item">
+                        <span class="stat-value">1</span>
+                        <span class="stat-label">BIN-Token</span>
+                    </div>
+                </div>
+            </div>
+            <div class="hero-image">
+                <img src="hero-image.svg" alt="Binom Dots Illustration">
+            </div>
+        </div>
+
+        <div class="rewards-card">
+            <div class="dots-balance">
+                <h2>Your Balance</h2>
+                <div class="dots-count" id="dots-count">0</div>
+                <p>dots</p>
+            </div>
+
+            <div class="rewards-section">
+                <h2>Daily Rewards</h2>
+                
+                <div class="reward-item">
+                    <div class="reward-icon">
+                        <i class="fas fa-calendar-check"></i>
+                    </div>
+                    <div class="reward-info">
+                        <h3>Daily Check-in</h3>
+                        <p>Claim once every 24 hours</p>
+                    </div>
+                    <div class="reward-value">+10 dots</div>
+                    <button class="btn" id="checkin-btn">Claim</button>
+                </div>
+                
+                <div class="reward-item">
+                    <div class="reward-icon">
+                        <i class="fas fa-share-alt"></i>
+                    </div>
+                    <div class="reward-info">
+                        <h3>Share Profile</h3>
+                        <p>Share to social media once daily</p>
+                    </div>
+                    <div class="reward-value">+20 dots</div>
+                    <button class="btn" id="share-btn">Share</button>
+                </div>
+            </div>
+
+            <div class="connect-section">
+                <p>Connect with Telegram to claim rewards</p>
+                <button class="btn btn-telegram" id="telegram-btn">
+                    <i class="fab fa-telegram"></i> Connect Telegram
+                </button>
+                <!-- <p class="connect-note">Press Ctrl+L to simulate login (for testing)</p> -->
+            </div>
+        </div>
+
+        <div class="share-options" id="share-options">
+            <h2>Share to Social Media</h2>
+            <p>Choose a platform to share and earn 20 dots:</p>
+            <div class="share-buttons">
+                <button class="share-btn instagram-btn" data-platform="instagram">
+                    <i class="fab fa-instagram"></i> Instagram
+                </button>
+                <button class="share-btn telegram-btn" data-platform="telegram">
+                    <i class="fab fa-telegram"></i> Telegram
+                </button>
+                <button class="share-btn twitter-btn" data-platform="twitter">
+                    <i class="fab fa-twitter"></i> X (Twitter)
+                </button>
+                <button class="share-btn whatsapp-btn" data-platform="whatsapp">
+                    <i class="fab fa-whatsapp"></i> WhatsApp
+                </button>
+            </div>
+        </div>
+
+        <div class="features-section">
+            <h2>How It Works</h2>
+            <div class="features-grid">
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <i class="fas fa-user-plus"></i>
+                    </div>
+                    <h3>Connect</h3>
+                    <p>Link your Telegram account to start earning dots</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <i class="fas fa-clock"></i>
+                    </div>
+                    <h3>Check-in Daily</h3>
+                    <p>Earn 10 dots every day just by checking in</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <i class="fas fa-share-square"></i>
+                    </div>
+                    <h3>Share</h3>
+                    <p>Share with friends to earn 20 additional dots daily</p>
+                </div>
+                <div class="feature-item">
+                    <div class="feature-icon">
+                        <i class="fas fa-coins"></i>
+                    </div>
+                    <h3>Redeem</h3>
+                    <p>Exchange your dots for tokens when our blockchain launches</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="official-links">
+            <h2>Official Links</h2>
+            <div class="links-grid">
+                <a href="https://binomena.com/" target="_blank" class="link-item">
+                    <div class="link-icon">
+                        <i class="fas fa-globe"></i>
+                    </div>
+                    <h3>Binomena</h3>
+                    <p>Visit our blockchain project website</p>
+                </a>
+                <a href="https://adaneural.com/" target="_blank" class="link-item">
+                    <div class="link-icon">
+                        <i class="fas fa-brain"></i>
+                    </div>
+                    <h3>ADA Neural</h3>
+                    <p>Explore our neural network technology</p>
+                </a>
+                <a href="https://www.instagram.com/adaneural/" target="_blank" class="link-item">
+                    <div class="link-icon">
+                        <i class="fab fa-instagram"></i>
+                    </div>
+                    <h3>ADA Neural Instagram</h3>
+                    <p>Follow our latest updates</p>
+                </a>
+                <a href="https://www.instagram.com/juxhino_kapllanaj/" target="_blank" class="link-item">
+                    <div class="link-icon">
+                        <i class="fab fa-instagram"></i>
+                    </div>
+                    <h3>Founder's Instagram</h3>
+                    <p>Connect with our founder</p>
+                </a>
+            </div>
+        </div>
+
+        <footer>
+            <div class="footer-content">
+                <div class="footer-logo">
+                    <img src="logo.svg" alt="Binom Dots Logo" class="logo-small">
+                    <p>Binom Dots from Binomena Blockchain</p>
+                </div>
+                <div class="footer-links">
+                    <a href="https://www.instagram.com/adaneural/" target="_blank" class="social-icon">
+                        <i class="fab fa-instagram"></i>
+                    </a>
+                    <a href="https://www.youtube.com/@uJ1N0" target="_blank" class="social-icon">
+                        <i class="fab fa-youtube"></i>
+                    </a>
+                    <a href="https://binomena.com/" target="_blank" class="social-icon">
+                        <i class="fas fa-globe"></i>
+                    </a>
+                    <a href="https://t.me/binomchain" target="_blank" class="social-icon">
+                        <i class="fab fa-telegram"></i>
+                    </a>
+                </div>
+            </div>
+            <p class="copyright">&copy; 2023 Binom Dots. All rights reserved.</p>
+            <p class="powered-by">Powered by ADA Neural</p>
+        </footer>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
+
