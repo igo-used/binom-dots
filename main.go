@@ -135,10 +135,13 @@ func main() {
 	// Load existing users
 	loadUsers()
 
-	// Set up Telegram bot
-	bot, err := tgbotapi.NewBotAPI("7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84")
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if botToken == "" {
+		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
+	}
+	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
-		log.Panic(err)
+		log.Panic(err) // This is how you were handling the error earlier in your code
 	}
 
 	bot.Debug = true
