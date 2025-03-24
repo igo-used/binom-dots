@@ -106,7 +106,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Connect with Telegram
   telegramBtn.addEventListener("click", () => {
     // Open Telegram bot in a new window
-    window.open("https://t.me/BinomDotsBot", "_blank")
+    window.open("https://t.me/BinomChain_bot", "_blank")
 
     // Show instructions to the user
     alert(
