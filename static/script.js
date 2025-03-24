@@ -29,7 +29,7 @@ document.addEventListener("DOMContentLoaded", () => {
   function fetchUserData() {
     if (!userId) return
 
-    fetch(`/api/user?id=${userId}`)
+    fetch(`https://binom-dots.onrender.com/api/user?id=${userId}`)
       .then((response) => {
         if (!response.ok) {
           throw new Error("User not found")
@@ -77,7 +77,7 @@ document.addEventListener("DOMContentLoaded", () => {
   // Connect with Telegram
   telegramBtn.addEventListener("click", () => {
     // Open Telegram bot in a new window
-    window.open("https://t.me/YOUR_BOT_USERNAME", "_blank")
+    window.open("https://t.me/BinomDotsBot", "_blank")
 
     // For demo purposes, we'll simulate a successful connection
     // In a real app, you'd implement Telegram Login Widget
