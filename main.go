@@ -24,6 +24,23 @@ type User struct {
 // Global map to store users (in a real app, you'd use a database)
 var users = make(map[int64]*User)
 
+func corsMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "https://dbotblock29.site/") // Replace with your Hostinger domain
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		next.ServeHTTP(w, r)
+	})
+}
+
 // Load users from a JSON file
 func loadUsers() {
 	data, err := os.ReadFile("users.json")
