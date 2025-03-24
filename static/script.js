@@ -9,6 +9,29 @@ document.addEventListener("DOMContentLoaded", () => {
   let userId = localStorage.getItem("userId")
   let userDots = 0
 
+  // Add a manual connect button
+  const manualConnectBtn = document.createElement("button")
+  manualConnectBtn.className = "btn"
+  manualConnectBtn.textContent = "Connect with Telegram ID"
+  manualConnectBtn.style.marginTop = "10px"
+  telegramBtn.parentNode.appendChild(manualConnectBtn)
+
+  // Function to prompt for Telegram ID
+  function promptForTelegramId() {
+    const telegramId = prompt("Please enter your Telegram user ID (5852704109):", "")
+    if (telegramId && !isNaN(telegramId)) {
+      userId = telegramId
+      localStorage.setItem("userId", userId)
+      checkUserConnection()
+      alert("Connected successfully! Your Telegram ID: " + userId)
+    } else {
+      alert("Invalid Telegram ID. Please try again.")
+    }
+  }
+
+  // Add event listener for manual connect button
+  manualConnectBtn.addEventListener("click", promptForTelegramId)
+
   // Check if user is connected
   function checkUserConnection() {
     if (userId) {
@@ -16,18 +39,22 @@ document.addEventListener("DOMContentLoaded", () => {
       fetchUserData()
       telegramBtn.textContent = "Connected with Telegram"
       telegramBtn.disabled = true
+      manualConnectBtn.style.display = "none"
       checkinBtn.disabled = false
       shareBtn.disabled = false
     } else {
       // User is not connected
       checkinBtn.disabled = true
       shareBtn.disabled = true
+      manualConnectBtn.style.display = "block"
     }
   }
 
   // Fetch user data from the API
   function fetchUserData() {
     if (!userId) return
+
+    console.log("Fetching data for user ID:", userId)
 
     fetch(`https://binom-dots.onrender.com/api/user?id=${userId}`)
       .then((response) => {
@@ -37,6 +64,7 @@ document.addEventListener("DOMContentLoaded", () => {
         return response.json()
       })
       .then((data) => {
+        console.log("User data received:", data)
         userDots = data.dots
         dotsCount.textContent = userDots
 
@@ -68,6 +96,7 @@ document.addEventListener("DOMContentLoaded", () => {
         console.error("Error fetching user data:", error)
         // If user not found, clear localStorage
         if (error.message === "User not found") {
+          alert("User not found. Please connect with your Telegram ID again.")
           localStorage.removeItem("userId")
           checkUserConnection()
         }
@@ -79,33 +108,21 @@ document.addEventListener("DOMContentLoaded", () => {
     // Open Telegram bot in a new window
     window.open("https://t.me/BinomDotsBot", "_blank")
 
-    // For demo purposes, we'll simulate a successful connection
-    // In a real app, you'd implement Telegram Login Widget
-    // https://core.telegram.org/widgets/login
-
-    // Simulate user login after 3 seconds
-    setTimeout(() => {
-      // Generate a random user ID for demo
-      userId = Math.floor(Math.random() * 1000000).toString()
-      localStorage.setItem("userId", userId)
-
-      // Update UI
-      checkUserConnection()
-
-      // Show success message
-      alert("Successfully connected with Telegram!")
-    }, 3000)
+    // Show instructions to the user
+    alert(
+      "1. Send /start to the bot\n2. Use /checkin and /share to earn dots\n3. Come back here and click 'Connect with Telegram ID'\n4. Enter your Telegram ID: 5852704109",
+    )
   })
 
   // Add this after the telegramBtn event listener
-  // For local testing only - simulates a login without actually opening Telegram
+  // For local testing only - simulates a login with the actual Telegram ID
   document.addEventListener("keydown", (event) => {
-    // Press Ctrl+L to simulate login
+    // Press Ctrl+L to simulate login with actual Telegram ID
     if (event.ctrlKey && event.key === "l") {
-      userId = Math.floor(Math.random() * 1000000).toString()
+      userId = "5852704109" // Use the actual Telegram ID from logs
       localStorage.setItem("userId", userId)
       checkUserConnection()
-      alert("Simulated login successful! User ID: " + userId)
+      alert("Connected with your actual Telegram ID: " + userId)
     }
   })
 
@@ -113,16 +130,27 @@ document.addEventListener("DOMContentLoaded", () => {
   checkinBtn.addEventListener("click", () => {
     if (!userId) return
 
-    // In a real app, you'd make an API call to the backend
-    // For demo, we'll simulate a successful claim
-    userDots += 10
-    dotsCount.textContent = userDots
-
-    checkinBtn.disabled = true
-    checkinBtn.textContent = "Claimed Today"
-
-    // Show success message
-    alert("You claimed 10 dots for daily check-in!")
+    // Make an actual API call to the backend
+    fetch(`https://binom-dots.onrender.com/api/checkin?id=${userId}`, {
+      method: "POST",
+    })
+      .then((response) => {
+        if (!response.ok) {
+          throw new Error("Failed to check in")
+        }
+        return response.json()
+      })
+      .then((data) => {
+        userDots = data.dots
+        dotsCount.textContent = userDots
+        checkinBtn.disabled = true
+        checkinBtn.textContent = "Claimed Today"
+        alert("You claimed 10 dots for daily check-in!")
+      })
+      .catch((error) => {
+        console.error("Error claiming daily reward:", error)
+        alert("Failed to claim reward. Please try again later.")
+      })
   })
 
   // Show share options
@@ -176,19 +204,28 @@ document.addEventListener("DOMContentLoaded", () => {
           break
       }
 
-      // Simulate successful share after 5 seconds
-      setTimeout(() => {
-        userDots += 20
-        dotsCount.textContent = userDots
-
-        shareBtn.disabled = true
-        shareBtn.textContent = "Shared Today"
-
-        // Hide share options
-        shareOptions.classList.remove("active")
-
-        alert("Thanks for sharing! You earned 20 dots!")
-      }, 5000)
+      // Make an actual API call to the backend
+      fetch(`https://binom-dots.onrender.com/api/share?id=${userId}`, {
+        method: "POST",
+      })
+        .then((response) => {
+          if (!response.ok) {
+            throw new Error("Failed to claim share reward")
+          }
+          return response.json()
+        })
+        .then((data) => {
+          userDots = data.dots
+          dotsCount.textContent = userDots
+          shareBtn.disabled = true
+          shareBtn.textContent = "Shared Today"
+          shareOptions.classList.remove("active")
+          alert("Thanks for sharing! You earned 20 dots!")
+        })
+        .catch((error) => {
+          console.error("Error claiming share reward:", error)
+          alert("Failed to claim share reward. Please try again later.")
+        })
     })
   })
 

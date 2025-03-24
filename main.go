@@ -24,23 +24,6 @@ type User struct {
 // Global map to store users (in a real app, you'd use a database)
 var users = make(map[int64]*User)
 
-func corsMiddleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "https://dbotblock29.site/") // Replace with your Hostinger domain
-		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		next.ServeHTTP(w, r)
-	})
-}
-
 // Load users from a JSON file
 func loadUsers() {
 	data, err := os.ReadFile("users.json")
@@ -148,27 +131,12 @@ func getUserDots(userID int64) int {
 	return user.Dots
 }
 
-// Add a health check endpoint
-func healthCheckHandler(w http.ResponseWriter, r *http.Request) {
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte("OK"))
-}
-
 func main() {
 	// Load existing users
 	loadUsers()
 
-	// Check if running in production (Render)
-	isProduction := os.Getenv("RENDER") != ""
-
-	// Get bot token from environment variable or use default for local development
-	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
-	if botToken == "" {
-		botToken = "7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84" // Use this only for local development
-	}
-
 	// Set up Telegram bot
-	bot, err := tgbotapi.NewBotAPI(botToken)
+	bot, err := tgbotapi.NewBotAPI("7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84")
 	if err != nil {
 		log.Panic(err)
 	}
@@ -176,65 +144,23 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// Health check endpoint
-	http.HandleFunc("/health", healthCheckHandler)
+	// Comment out webhook setup for local testing
+	// webhookURL := "https://dbotblock29.site/bot"
+	// _, err = bot.Request(tgbotapi.NewSetWebhook(webhookURL))
+	// if err != nil {
+	//     log.Fatal(err)
+	// }
 
-	// API endpoints for the web interface
-	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
-		userIDStr := r.URL.Query().Get("id")
-		if userIDStr == "" {
-			http.Error(w, "Missing user ID", http.StatusBadRequest)
-			return
-		}
+	// Use long polling instead for local testing
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := bot.GetUpdatesChan(u)
 
-		userID, err := strconv.ParseInt(userIDStr, 10, 64)
-		if err != nil {
-			http.Error(w, "Invalid user ID", http.StatusBadRequest)
-			return
-		}
-
-		user, exists := users[userID]
-		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(user)
-	})
-
-	// Serve static files for the web interface
-	fs := http.FileServer(http.Dir("./static"))
-	http.Handle("/", fs)
-
-	// Handle Telegram updates
-	if isProduction {
-		// Set up webhook for production
-		appURL := os.Getenv("RENDER_EXTERNAL_URL")
-		if appURL == "" {
-			appURL = "https://binom-dots.onrender.com" // Default URL, change this to your actual Render URL
-		}
-
-		webhookURL := appURL + "/bot"
-
-		// Set the webhook
-		webhookConfig, _ := tgbotapi.NewWebhook(webhookURL)
-		_, err = bot.Request(webhookConfig)
-		if err != nil {
-			log.Fatal(err)
-		}
-		log.Printf("Webhook set to %s", webhookURL)
-
-		// Webhook handler
-		http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
-			update, err := bot.HandleUpdate(r)
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
+	// Start a goroutine to handle Telegram updates
+	go func() {
+		for update := range updates {
 			if update.Message == nil {
-				return
+				continue
 			}
 
 			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
@@ -243,7 +169,7 @@ func main() {
 
 			switch update.Message.Text {
 			case "/start":
-				msg.Text = "Welcome to Binom Dots! 🎉\n\n" +
+				msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
 					"Earn dots daily and exchange them for tokens later.\n\n" +
 					"Commands:\n" +
 					"/checkin - Get 10 dots daily\n" +
@@ -273,83 +199,189 @@ func main() {
 			if _, err := bot.Send(msg); err != nil {
 				log.Println(err)
 			}
-		})
+		}
+	}()
 
-		// Set up a goroutine to ping the service every 14 minutes to prevent sleep
-		go func() {
-			ticker := time.NewTicker(14 * time.Minute)
-			client := &http.Client{Timeout: 10 * time.Second}
-			for range ticker.C {
-				_, err := client.Get(appURL + "/health")
-				if err != nil {
-					log.Printf("Self-ping failed: %v", err)
-				} else {
-					log.Printf("Self-ping successful")
-				}
-			}
-		}()
-	} else {
-		// Use long polling for local development
-		u := tgbotapi.NewUpdate(0)
-		u.Timeout = 60
-		updates := bot.GetUpdatesChan(u)
+	// Comment out the webhook handler
+	// http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
+	// 	update, err := bot.HandleUpdate(r)
+	// 	if err != nil {
+	// 		log.Println(err)
+	// 		return
+	// 	}
 
-		// Start a goroutine to handle Telegram updates
-		go func() {
-			for update := range updates {
-				if update.Message == nil {
-					continue
-				}
+	// 	if update.Message == nil {
+	// 		return
+	// 	}
 
-				msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-				userID := update.Message.From.ID
-				username := update.Message.From.UserName
+	// 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+	// 	userID := update.Message.From.ID
+	// 	username := update.Message.From.UserName
 
-				switch update.Message.Text {
-				case "/start":
-					msg.Text = "Welcome to Binom Dots! 🎉\n\n" +
-						"Earn dots daily and exchange them for tokens later.\n\n" +
-						"Commands:\n" +
-						"/checkin - Get 10 dots daily\n" +
-						"/share - Get 20 dots for sharing\n" +
-						"/balance - Check your dots balance"
-				case "/checkin":
-					if canClaimDaily(userID) {
-						dots := awardDailyDots(userID, username)
-						msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-					} else {
-						msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
-					}
-				case "/share":
-					if canClaimShareReward(userID) {
-						dots := awardShareDots(userID, username)
-						msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-					} else {
-						msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
-					}
-				case "/balance":
-					dots := getUserDots(userID)
-					msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-				default:
-					msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-				}
+	// 	switch update.Message.Text {
+	// 	case "/start":
+	// 		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+	// 			"Earn dots daily and exchange them for tokens later.\n\n" +
+	// 			"Commands:\n" +
+	// 			"/checkin - Get 10 dots daily\n" +
+	// 			"/share - Get 20 dots for sharing\n" +
+	// 			"/balance - Check your dots balance"
+	// 	case "/checkin":
+	// 		if canClaimDaily(userID) {
+	// 			dots := awardDailyDots(userID, username)
+	// 			msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+	// 		} else {
+	// 			msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
+	// 		}
+	// 	case "/share":
+	// 		if canClaimShareReward(userID) {
+	// 			dots := awardShareDots(userID, username)
+	// 			msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+	// 		} else {
+	// 			msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
+	// 		}
+	// 	case "/balance":
+	// 		dots := getUserDots(userID)
+	// 		msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+	// 	default:
+	// 		msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
+	// 	}
 
-				if _, err := bot.Send(msg); err != nil {
-					log.Println(err)
-				}
-			}
-		}()
-	}
+	// 	if _, err := bot.Send(msg); err != nil {
+	// 		log.Println(err)
+	// 	}
+	// })
 
-	// Get port from environment variable or use default
-	port := os.Getenv("PORT")
-	if port == "" {
-		port = "8080" // Default port if not specified
-	}
+	// API endpoints for the web interface
+	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		userIDStr := r.URL.Query().Get("id")
+		if userIDStr == "" {
+			http.Error(w, "Missing user ID", http.StatusBadRequest)
+			return
+		}
+
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		user, exists := users[userID]
+		if !exists {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(user)
+	})
+
+	// API endpoint for daily check-in
+	http.HandleFunc("/api/checkin", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		userIDStr := r.URL.Query().Get("id")
+		if userIDStr == "" {
+			http.Error(w, "Missing user ID", http.StatusBadRequest)
+			return
+		}
+
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		user, exists := users[userID]
+		if !exists {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		if canClaimDaily(userID) {
+			dots := awardDailyDots(userID, user.Username)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"dots":    dots,
+				"message": "Daily check-in successful",
+			})
+		} else {
+			http.Error(w, "Already claimed today", http.StatusBadRequest)
+		}
+	})
+
+	// API endpoint for sharing
+	http.HandleFunc("/api/share", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		userIDStr := r.URL.Query().Get("id")
+		if userIDStr == "" {
+			http.Error(w, "Missing user ID", http.StatusBadRequest)
+			return
+		}
+
+		userID, err := strconv.ParseInt(userIDStr, 10, 64)
+		if err != nil {
+			http.Error(w, "Invalid user ID", http.StatusBadRequest)
+			return
+		}
+
+		user, exists := users[userID]
+		if !exists {
+			http.Error(w, "User not found", http.StatusNotFound)
+			return
+		}
+
+		if canClaimShareReward(userID) {
+			dots := awardShareDots(userID, user.Username)
+			w.Header().Set("Content-Type", "application/json")
+			json.NewEncoder(w).Encode(map[string]interface{}{
+				"success": true,
+				"dots":    dots,
+				"message": "Share reward claimed successfully",
+			})
+		} else {
+			http.Error(w, "Already claimed today", http.StatusBadRequest)
+		}
+	})
+
+	// Serve static files for the web interface
+	fs := http.FileServer(http.Dir("./static"))
+	http.Handle("/", fs)
 
 	// Start the server
-	log.Println("Starting server on :" + port)
-	if err := http.ListenAndServe(":"+port, nil); err != nil {
+	log.Println("Starting server on :8080")
+	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatal(err)
 	}
 }
