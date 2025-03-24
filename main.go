@@ -4,13 +4,36 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"math/rand"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
+
+// File paths
+var dataDir = "."
+var usersFilePath = filepath.Join(dataDir, "users.json")
+
+// Initialize data directory
+func init() {
+	// Check if we're on Render with a disk mount
+	if _, err := os.Stat("/data"); err == nil {
+		dataDir = "/data"
+		usersFilePath = filepath.Join(dataDir, "users.json")
+		log.Println("Using persistent data directory:", dataDir)
+	} else {
+		log.Println("Using local directory for data")
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(dataDir, 0755); err != nil {
+		log.Printf("Error creating data directory: %v", err)
+	}
+}
 
 // User represents a user in our system
 type User struct {
@@ -21,15 +44,18 @@ type User struct {
 	LastShareReward time.Time `json:"last_share_reward"`
 }
 
-// Global map to store users (in a real app, you'd use a database)
+// Global map to store users
 var users = make(map[int64]*User)
 
 // Load users from a JSON file
 func loadUsers() {
-	data, err := os.ReadFile("users.json")
+	log.Printf("Loading users from %s", usersFilePath)
+	data, err := os.ReadFile(usersFilePath)
 	if err != nil {
 		if !os.IsNotExist(err) {
 			log.Printf("Error reading users file: %v", err)
+		} else {
+			log.Printf("Users file does not exist yet, will create on first save")
 		}
 		return
 	}
@@ -59,8 +85,11 @@ func saveUsers() {
 		return
 	}
 
-	if err := os.WriteFile("users.json", data, 0644); err != nil {
+	log.Printf("Saving %d users to %s", len(userList), usersFilePath)
+	if err := os.WriteFile(usersFilePath, data, 0644); err != nil {
 		log.Printf("Error writing users file: %v", err)
+	} else {
+		log.Printf("Successfully saved users to %s", usersFilePath)
 	}
 }
 
@@ -131,14 +160,84 @@ func getUserDots(userID int64) int {
 	return user.Dots
 }
 
+// Process Telegram message
+func processTelegramMessage(update *tgbotapi.Update, bot *tgbotapi.BotAPI) {
+	if update.Message == nil {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+	userID := update.Message.From.ID
+	username := update.Message.From.UserName
+
+	switch update.Message.Text {
+	case "/start":
+		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+			"Earn dots daily and exchange them for tokens later.\n\n" +
+			"Commands:\n" +
+			"/checkin - Get 10 dots daily\n" +
+			"/share - Get 20 dots for sharing\n" +
+			"/balance - Check your dots balance\n" +
+			"/id - Get your Telegram ID for the website"
+	case "/checkin":
+		if canClaimDaily(userID) {
+			dots := awardDailyDots(userID, username)
+			msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+		} else {
+			msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
+		}
+	case "/share":
+		if canClaimShareReward(userID) {
+			dots := awardShareDots(userID, username)
+			msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+		} else {
+			msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
+		}
+	case "/balance":
+		dots := getUserDots(userID)
+		msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+	case "/id":
+		msg.Text = fmt.Sprintf("Your Telegram ID is: %d\n\nUse this ID to connect on our website: https://dbotblock29.site", userID)
+	case "/help":
+		msg.Text = "📚 *Binom Dots Bot Commands*\n\n" +
+			"*/start* - Welcome message and introduction\n" +
+			"*/checkin* - Claim your daily 10 dots reward\n" +
+			"*/share* - Get 20 dots for sharing (once per day)\n" +
+			"*/balance* - Check your current dots balance\n" +
+			"*/id* - Get your Telegram ID for the website\n" +
+			"*/help* - Show this help message"
+		msg.ParseMode = "Markdown"
+	case "/info":
+		msg.Text = "ℹ️ *About Binom Dots*\n\n" +
+			"Binom Dots is a rewards program by Binomena Blockchain.\n\n" +
+			"• Collect dots daily by checking in and sharing\n" +
+			"• 1000 dots = 1 token when our blockchain launches\n" +
+			"• Visit our website: https://dbotblock29.site\n\n" +
+			"Powered by ADA Neural technology"
+		msg.ParseMode = "Markdown"
+	default:
+		msg.Text = "I don't understand that command. Try /start, /checkin, /share, /balance, or /help."
+	}
+
+	if _, err := bot.Send(msg); err != nil {
+		log.Println(err)
+	}
+}
+
 func main() {
+	// Initialize random seed
+	rand.Seed(time.Now().UnixNano())
+
 	// Load existing users
 	loadUsers()
 
+	// Get bot token from environment variable
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
 		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
 	}
+
+	// Initialize bot
 	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Panic(err)
@@ -147,83 +246,49 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// Comment out webhook setup for local testing
-	// webhookURL := "https://dbotblock29.site/bot"
-	// _, err = bot.Request(tgbotapi.NewSetWebhook(webhookURL))
-	// if err != nil {
-	//     log.Fatal(err)
-	// }
+	// Determine if we're in production or development
+	isProduction := os.Getenv("ENVIRONMENT") == "production"
 
-	// Use long polling instead for local testing
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	updates := bot.GetUpdatesChan(u)
+	if isProduction {
+		// For production, we'll just use the webhook handler without trying to set it
+		// The webhook should be set manually in the Telegram API
+		log.Printf("Running in production mode with webhook handler")
 
-	// Start a goroutine to handle Telegram updates
-	go func() {
-		for update := range updates {
-			if update.Message == nil {
-				continue
-			}
-
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-			userID := update.Message.From.ID
-			username := update.Message.From.UserName
-
-			switch update.Message.Text {
-			case "/start":
-				msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-					"Earn dots daily and exchange them for tokens later.\n\n" +
-					"Commands:\n" +
-					"/checkin - Get 10 dots daily\n" +
-					"/share - Get 20 dots for sharing\n" +
-					"/balance - Check your dots balance\n" +
-					"/id - Get your Telegram ID for the website"
-			case "/checkin":
-				if canClaimDaily(userID) {
-					dots := awardDailyDots(userID, username)
-					msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-				} else {
-					msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
-				}
-			case "/share":
-				if canClaimShareReward(userID) {
-					dots := awardShareDots(userID, username)
-					msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-				} else {
-					msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
-				}
-			case "/balance":
-				dots := getUserDots(userID)
-				msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-			case "/id":
-				msg.Text = fmt.Sprintf("Your Telegram ID is: %d\n\nUse this ID to connect on our website: https://dbotblock29.site", userID)
-			case "/help":
-				msg.Text = "📚 *Binom Dots Bot Commands*\n\n" +
-					"*/start* - Welcome message and introduction\n" +
-					"*/checkin* - Claim your daily 10 dots reward\n" +
-					"*/share* - Get 20 dots for sharing (once per day)\n" +
-					"*/balance* - Check your current dots balance\n" +
-					"*/id* - Get your Telegram ID for the website\n" +
-					"*/help* - Show this help message"
-				msg.ParseMode = "Markdown"
-			case "/info":
-				msg.Text = "ℹ️ *About Binom Dots*\n\n" +
-					"Binom Dots is a rewards program by Binomena Blockchain.\n\n" +
-					"• Collect dots daily by checking in and sharing\n" +
-					"• 1000 dots = 1 token when our blockchain launches\n" +
-					"• Visit our website: https://dbotblock29.site\n\n" +
-					"Powered by ADA Neural technology"
-				msg.ParseMode = "Markdown"
-			default:
-				msg.Text = "I don't understand that command. Try /start, /checkin, /share, /balance, or /help."
-			}
-
-			if _, err := bot.Send(msg); err != nil {
+		// Add webhook handler
+		http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
+			update, err := bot.HandleUpdate(r)
+			if err != nil {
 				log.Println(err)
+				return
 			}
-		}
-	}()
+
+			processTelegramMessage(update, bot)
+		})
+
+		// Log instructions for setting up the webhook manually
+		log.Printf("IMPORTANT: Set your webhook manually by visiting:")
+		log.Printf("https://api.telegram.org/bot%s/setWebhook?url=https://binom-dots.onrender.com/bot", botToken)
+	} else {
+		// Development: Use long polling with random offset to avoid conflicts
+		log.Printf("Running in development mode with long polling")
+
+		u := tgbotapi.NewUpdate(0)
+		u.Timeout = 60
+
+		// Add a random offset to avoid conflicts with other instances
+		// Convert int64 to int for the Offset field
+		randomOffset := int(rand.Int63n(100) + 1)
+		u.Offset = randomOffset
+
+		updates := bot.GetUpdatesChan(u)
+
+		// Start a goroutine to handle Telegram updates
+		go func() {
+			for update := range updates {
+				processTelegramMessage(&update, bot)
+			}
+		}()
+	}
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
@@ -389,13 +454,23 @@ func main() {
 		}
 	})
 
+	// Health check endpoint
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
+
 	// Serve static files for the web interface
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
 	// Start the server
-	log.Println("Starting server on :8080")
-	if err := http.ListenAndServe(":8080", nil); err != nil {
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
+	log.Printf("Starting server on port %s", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
 }
