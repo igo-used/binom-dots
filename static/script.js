@@ -175,21 +175,21 @@ document.addEventListener("DOMContentLoaded", () => {
   })
 
   // Add a test button for developers
-  const testButton = document.createElement("button")
-  testButton.className = "btn"
-  testButton.textContent = "Test Connection (Dev Only)"
-  testButton.style.marginTop = "10px"
-  testButton.style.backgroundColor = "#666"
-  testButton.addEventListener("click", function() {
-    const testId = prompt("Enter a Telegram ID for testing:", "")
-    if (testId && !isNaN(testId)) {
-      userId = testId
-      localStorage.setItem("userId", userId)
-      checkUserConnection()
-      alert("Test connection activated with ID: " + userId)
-    }
-  })
-  telegramBtn.parentNode.appendChild(testButton)
+  // const testButton = document.createElement("button")
+  // testButton.className = "btn"
+  // testButton.textContent = "Test Connection (Dev Only)"
+  // testButton.style.marginTop = "10px"
+  // testButton.style.backgroundColor = "#666"
+  // testButton.addEventListener("click", function() {
+  //   const testId = prompt("Enter a Telegram ID for testing:", "")
+  //   if (testId && !isNaN(testId)) {
+  //     userId = testId
+  //     localStorage.setItem("userId", userId)
+  //     checkUserConnection()
+  //     alert("Test connection activated with ID: " + userId)
+  //   }
+  // })
+  // telegramBtn.parentNode.appendChild(testButton)
 
   // Claim daily check-in reward
   checkinBtn.addEventListener("click", () => {
