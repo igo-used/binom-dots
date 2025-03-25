@@ -82,6 +82,27 @@ document.addEventListener("DOMContentLoaded", () => {
     }
   }
 
+  // Check if the time has passed 01:00 GMT+1
+  function hasPassedResetTime(lastTime) {
+    if (!lastTime) return true;
+    
+    const now = new Date();
+    const lastDate = new Date(lastTime);
+    
+    // Create reset time for today at 01:00 GMT+1
+    const resetTime = new Date(now);
+    resetTime.setHours(1, 0, 0, 0); // 01:00:00.000
+    resetTime.setMinutes(resetTime.getMinutes() + 60); // Add 1 hour for GMT+1
+    
+    // If now is before today's reset time, use yesterday's reset time
+    if (now < resetTime) {
+      resetTime.setDate(resetTime.getDate() - 1);
+    }
+    
+    // Check if the last claim was before the reset time
+    return lastDate < resetTime;
+  }
+
   // Fetch user data from the API
   function fetchUserData() {
     if (!userId) return
@@ -106,14 +127,9 @@ document.addEventListener("DOMContentLoaded", () => {
         userDots = data.dots
         dotsCount.textContent = userDots
 
-        // Check if daily rewards are available
-        const now = new Date()
-        const lastCheckIn = new Date(data.last_check_in)
-        const lastShareReward = new Date(data.last_share_reward)
-
-        const checkInAvailable = !data.last_check_in || (now - lastCheckIn) / (1000 * 60 * 60) >= 24
-
-        const shareAvailable = !data.last_share_reward || (now - lastShareReward) / (1000 * 60 * 60) >= 24
+        // Check if daily rewards are available using the new reset time logic
+        const checkInAvailable = hasPassedResetTime(data.last_check_in);
+        const shareAvailable = hasPassedResetTime(data.last_share_reward);
 
         checkinBtn.disabled = !checkInAvailable
         shareBtn.disabled = !shareAvailable
@@ -158,38 +174,6 @@ document.addEventListener("DOMContentLoaded", () => {
       )
     }, 500)
   })
-
-  // For local testing only - simulates a login with the actual Telegram ID
-  document.addEventListener("keydown", (event) => {
-    // Press Ctrl+L to simulate login with actual Telegram ID
-    if (event.ctrlKey && event.key === "l") {
-      // Prompt for ID instead of using hardcoded value
-      const testId = prompt("Enter a Telegram ID for testing:", "")
-      if (testId && !isNaN(testId)) {
-        userId = testId
-        localStorage.setItem("userId", userId)
-        checkUserConnection()
-        alert("Test connection activated with ID: " + userId)
-      }
-    }
-  })
-
-  // Add a test button for developers
-  // const testButton = document.createElement("button")
-  // testButton.className = "btn"
-  // testButton.textContent = "Test Connection (Dev Only)"
-  // testButton.style.marginTop = "10px"
-  // testButton.style.backgroundColor = "#666"
-  // testButton.addEventListener("click", function() {
-  //   const testId = prompt("Enter a Telegram ID for testing:", "")
-  //   if (testId && !isNaN(testId)) {
-  //     userId = testId
-  //     localStorage.setItem("userId", userId)
-  //     checkUserConnection()
-  //     alert("Test connection activated with ID: " + userId)
-  //   }
-  // })
-  // telegramBtn.parentNode.appendChild(testButton)
 
   // Claim daily check-in reward
   checkinBtn.addEventListener("click", () => {
@@ -239,7 +223,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       const platform = button.getAttribute("data-platform")
       let shareUrl = ""
-      const shareText = "I'm collecting Binom Dots from Binomena Blockchain! Join me: https://dbotblock29.site"
+      const shareText = "I'm collecting Binom Dots from Binomena Blockchain!"
 
       console.log("Sharing to platform:", platform)
 
