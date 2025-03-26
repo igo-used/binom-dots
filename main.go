@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -226,7 +227,19 @@ func main() {
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
 	// Set webhook
-	webhookURL := "https://binom-dots.onrender.com/bot"
+	webhookURLStr := "https://binom-dots.onrender.com/bot"
+	webhookURL, err := url.Parse(webhookURLStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// First, delete any existing webhook
+	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	if err != nil {
+		log.Printf("Error deleting webhook: %v", err)
+	}
+
+	// Then set the new webhook
 	_, err = bot.Request(tgbotapi.WebhookConfig{
 		URL: webhookURL,
 	})
@@ -241,8 +254,6 @@ func main() {
 	}
 
 	log.Printf("Webhook set to: %s", info.URL)
-	log.Printf("Webhook info: URL=%s, PendingUpdates=%d",
-		info.URL, info.PendingUpdateCount)
 
 	// Add webhook handler
 	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
