@@ -464,7 +464,11 @@ func main() {
 			http.Error(w, "Already claimed today", http.StatusBadRequest)
 		}
 	})
-
+	// Add a health check endpoint for Render
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
+	})
 	// Serve static files for the web interface
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
