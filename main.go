@@ -491,10 +491,9 @@ func main() {
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
-	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "10000" // Change this to 10000
 	}
 	log.Printf("Starting server on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
