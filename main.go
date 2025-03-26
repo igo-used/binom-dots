@@ -529,17 +529,21 @@ func main() {
 		}
 	})
 
-	// Health check endpoint for Render
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Set appropriate headers
-		w.Header().Set("Content-Type", "text/plain")
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
 
-		// Return a 200 OK status with a simple message
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Return a simple OK response
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
-
-		// Log that the health check was called
-		log.Println("Health check endpoint called")
 	})
 
 	// Serve static files for the web interface
