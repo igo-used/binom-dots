@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -222,6 +223,65 @@ func getUserDots(userID int64) (int, error) {
 	return user.Dots, nil
 }
 
+// Handle Telegram bot messages
+func handleTelegramMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
+	if update.Message == nil {
+		return
+	}
+
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+	userID := update.Message.From.ID
+	username := update.Message.From.UserName
+
+	switch update.Message.Text {
+	case "/start":
+		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+			"Earn dots daily and exchange them for tokens later.\n\n" +
+			"Commands:\n" +
+			"/checkin - Get 10 dots daily\n" +
+			"/share - Get 20 dots for sharing\n" +
+			"/balance - Check your dots balance"
+	case "/checkin":
+		if canClaimDaily(userID) {
+			dots, err := awardDailyDots(userID, username)
+			if err != nil {
+				log.Printf("Error awarding daily dots: %v", err)
+				msg.Text = "❌ Error claiming daily reward. Please try again later."
+			} else {
+				msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+			}
+		} else {
+			msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
+		}
+	case "/share":
+		if canClaimShareReward(userID) {
+			dots, err := awardShareDots(userID, username)
+			if err != nil {
+				log.Printf("Error awarding share dots: %v", err)
+				msg.Text = "❌ Error claiming share reward. Please try again later."
+			} else {
+				msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+			}
+		} else {
+			msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
+		}
+	case "/balance":
+		dots, err := getUserDots(userID)
+		if err != nil {
+			log.Printf("Error getting user dots: %v", err)
+			msg.Text = "❌ Error checking balance. Please try again later."
+		} else {
+			msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+		}
+	default:
+		msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
+	}
+
+	if _, err := bot.Send(msg); err != nil {
+		log.Println(err)
+	}
+}
+
 func main() {
 	// Get bot token from environment variable
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
@@ -238,71 +298,56 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// Use long polling for updates
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	updates := bot.GetUpdatesChan(u)
+	// First, delete any existing webhook
+	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	if err != nil {
+		log.Printf("Error deleting webhook: %v", err)
+	}
 
-	// Start a goroutine to handle Telegram updates
-	go func() {
-		for update := range updates {
-			if update.Message == nil {
-				continue
+	// Get webhook URL from environment variable
+	webhookURL := os.Getenv("WEBHOOK_URL")
+
+	if webhookURL != "" {
+		// Parse the webhook URL string into a *url.URL
+		parsedURL, err := url.Parse(webhookURL)
+		if err != nil {
+			log.Printf("Error parsing webhook URL: %v", err)
+		} else {
+			// Set webhook using the correct method
+			webhookConfig := tgbotapi.WebhookConfig{
+				URL: parsedURL,
 			}
+			_, err = bot.Request(webhookConfig)
+			if err != nil {
+				log.Printf("Error setting webhook: %v", err)
+			} else {
+				log.Printf("Webhook set to: %s", webhookURL)
 
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-			userID := update.Message.From.ID
-			username := update.Message.From.UserName
-
-			switch update.Message.Text {
-			case "/start":
-				msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-					"Earn dots daily and exchange them for tokens later.\n\n" +
-					"Commands:\n" +
-					"/checkin - Get 10 dots daily\n" +
-					"/share - Get 20 dots for sharing\n" +
-					"/balance - Check your dots balance"
-			case "/checkin":
-				if canClaimDaily(userID) {
-					dots, err := awardDailyDots(userID, username)
+				// Set up webhook handler
+				http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
+					update, err := bot.HandleUpdate(r)
 					if err != nil {
-						log.Printf("Error awarding daily dots: %v", err)
-						msg.Text = "❌ Error claiming daily reward. Please try again later."
-					} else {
-						msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+						log.Printf("Error handling update: %v", err)
+						return
 					}
-				} else {
-					msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
-				}
-			case "/share":
-				if canClaimShareReward(userID) {
-					dots, err := awardShareDots(userID, username)
-					if err != nil {
-						log.Printf("Error awarding share dots: %v", err)
-						msg.Text = "❌ Error claiming share reward. Please try again later."
-					} else {
-						msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-					}
-				} else {
-					msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
-				}
-			case "/balance":
-				dots, err := getUserDots(userID)
-				if err != nil {
-					log.Printf("Error getting user dots: %v", err)
-					msg.Text = "❌ Error checking balance. Please try again later."
-				} else {
-					msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-				}
-			default:
-				msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-			}
-
-			if _, err := bot.Send(msg); err != nil {
-				log.Println(err)
+					handleTelegramMessage(bot, *update)
+				})
 			}
 		}
-	}()
+	} else {
+		// If no webhook URL is provided, use long polling instead
+		log.Println("No webhook URL provided, using long polling")
+		u := tgbotapi.NewUpdate(0)
+		u.Timeout = 60
+		updates := bot.GetUpdatesChan(u)
+
+		// Start a goroutine to handle Telegram updates
+		go func() {
+			for update := range updates {
+				handleTelegramMessage(bot, update)
+			}
+		}()
+	}
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
@@ -464,11 +509,13 @@ func main() {
 			http.Error(w, "Already claimed today", http.StatusBadRequest)
 		}
 	})
+
 	// Add a health check endpoint for Render
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
+
 	// Serve static files for the web interface
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
