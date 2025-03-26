@@ -7,6 +7,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -317,20 +318,23 @@ func main() {
 	if err != nil {
 		log.Printf("Error deleting webhook: %v", err)
 	}
-
-	// Get webhook URL
-	webhookURL := os.Getenv("https://binom-dots.onrender.com/bot")
+	// Get webhook URL from environment variable
+	webhookURL := os.Getenv("WEBHOOK_URL")
 	if webhookURL == "" {
 		log.Fatal("WEBHOOK_URL environment variable is not set")
 	}
 
-	// Set webhook
-	webhookConfig, err := tgbotapi.NewWebhook(webhookURL)
+	// Parse the webhook URL string into a *url.URL
+	parsedURL, err := url.Parse(webhookURL)
 	if err != nil {
-		log.Printf("Error creating webhook config: %v", err)
-		log.Fatal("Failed to create webhook configuration")
+		log.Printf("Error parsing webhook URL: %v", err)
+		log.Fatal("Invalid webhook URL")
 	}
 
+	// Set webhook using the correct method
+	webhookConfig := tgbotapi.WebhookConfig{
+		URL: parsedURL,
+	}
 	_, err = bot.Request(webhookConfig)
 	if err != nil {
 		log.Printf("Error setting webhook: %v", err)
