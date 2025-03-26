@@ -1,14 +1,14 @@
 package main
 
 import (
-	"bytes"
 	"encoding/json"
 	"fmt"
-	"io"
+	"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
 	"os"
+	"os/exec"
 	"strconv"
 	"time"
 
@@ -24,53 +24,112 @@ type User struct {
 	LastShareReward time.Time `json:"last_share_reward"`
 }
 
-// Supabase configuration
-var (
-	supabaseURL = os.Getenv("SUPABASE_URL")
-	supabaseKey = os.Getenv("SUPABASE_KEY")
-)
+// Global map to store users
+var users = make(map[int64]*User)
+var dataFile = "users.json"
+var lastSaveTime = time.Now()
 
-// Get a user from Supabase
-func getUser(userID int64) (*User, error) {
-	// Prepare the request
-	url := fmt.Sprintf("%s/rest/v1/users?id=eq.%d", supabaseURL, userID)
-	req, err := http.NewRequest("GET", url, nil)
+// Load users from the JSON file
+func loadUsers() {
+	// Pull latest changes from GitHub first
+	pullFromGitHub()
+
+	data, err := ioutil.ReadFile(dataFile)
 	if err != nil {
-		return nil, err
+		if !os.IsNotExist(err) {
+			log.Printf("Error reading users file: %v", err)
+		}
+		return
 	}
 
-	// Add headers
-	req.Header.Add("apikey", supabaseKey)
-	req.Header.Add("Authorization", "Bearer "+supabaseKey)
-
-	// Make the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	// Read the response
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, err
+	var userList []*User
+	if err := json.Unmarshal(data, &userList); err != nil {
+		log.Printf("Error unmarshaling users: %v", err)
+		return
 	}
 
-	// Parse the response
-	var users []*User
-	if err := json.Unmarshal(body, &users); err != nil {
-		return nil, err
+	for _, user := range userList {
+		users[user.ID] = user
 	}
-
-	// Check if user exists
-	if len(users) == 0 {
-		return nil, nil
-	}
-
-	return users[0], nil
+	log.Printf("Loaded %d users", len(users))
 }
 
+// Save users to the JSON file and push to GitHub
+func saveUsers() {
+	userList := make([]*User, 0, len(users))
+	for _, user := range users {
+		userList = append(userList, user)
+	}
+
+	data, err := json.MarshalIndent(userList, "", "  ")
+	if err != nil {
+		log.Printf("Error marshaling users: %v", err)
+		return
+	}
+
+	if err := ioutil.WriteFile(dataFile, data, 0644); err != nil {
+		log.Printf("Error writing users file: %v", err)
+		return
+	}
+
+	// Only push to GitHub every 5 minutes to avoid too many commits
+	if time.Since(lastSaveTime).Minutes() >= 5 {
+		pushToGitHub()
+		lastSaveTime = time.Now()
+	}
+}
+
+// Pull the latest data from GitHub
+func pullFromGitHub() {
+	cmd := exec.Command("git", "pull", "origin", "main")
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error pulling from GitHub: %v - %s", err, output)
+	} else {
+		log.Printf("Successfully pulled from GitHub: %s", output)
+	}
+}
+
+// Push changes to GitHub
+func pushToGitHub() {
+	// Add the users.json file
+	addCmd := exec.Command("git", "add", dataFile)
+	output, err := addCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error adding file to git: %v - %s", err, output)
+		return
+	}
+
+	// Commit the changes
+	commitCmd := exec.Command("git", "commit", "-m", "Update user data")
+	output, err = commitCmd.CombinedOutput()
+	if err != nil {
+		// If nothing to commit, that's fine
+		log.Printf("Git commit output: %s", output)
+		return
+	}
+
+	// Push to GitHub
+	pushCmd := exec.Command("git", "push", "origin", "main")
+	output, err = pushCmd.CombinedOutput()
+	if err != nil {
+		log.Printf("Error pushing to GitHub: %v - %s", err, output)
+		return
+	}
+
+	log.Printf("Successfully pushed data to GitHub")
+}
+
+// Get a user from the local map
+func getUser(userID int64) (*User, error) {
+	user, exists := users[userID]
+	if !exists {
+		return nil, nil
+	}
+	return user, nil
+}
+
+// Save a user to the local map and trigger JSON save
 func saveUser(user *User) error {
 	// Log the user data being saved
 	userData, err := json.Marshal(user)
@@ -80,43 +139,11 @@ func saveUser(user *User) error {
 	}
 	log.Printf("Saving user data: %s", string(userData))
 
-	// Prepare the request
-	url := fmt.Sprintf("%s/rest/v1/users", supabaseURL)
-	log.Printf("Supabase URL: %s", url)
+	// Save to the map
+	users[user.ID] = user
 
-	req, err := http.NewRequest("POST", url, bytes.NewBuffer(userData))
-	if err != nil {
-		log.Printf("Error creating request: %v", err)
-		return err
-	}
-
-	// Add headers
-	req.Header.Add("apikey", supabaseKey)
-	req.Header.Add("Authorization", "Bearer "+supabaseKey)
-	req.Header.Add("Content-Type", "application/json")
-	req.Header.Add("Prefer", "resolution=merge-duplicates")
-
-	// Make the request
-	client := &http.Client{}
-	resp, err := client.Do(req)
-	if err != nil {
-		log.Printf("Error making request: %v", err)
-		return err
-	}
-	defer resp.Body.Close()
-
-	// Read and log the response
-	respBody, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("Error reading response: %v", err)
-	} else {
-		log.Printf("Supabase response: %s", string(respBody))
-	}
-
-	if resp.StatusCode >= 400 {
-		log.Printf("Supabase error: %d %s", resp.StatusCode, resp.Status)
-		return fmt.Errorf("supabase error: %d %s", resp.StatusCode, resp.Status)
-	}
+	// Save to JSON file
+	saveUsers()
 
 	return nil
 }
@@ -230,10 +257,14 @@ func getUserDots(userID int64) (int, error) {
 }
 
 func main() {
+	// Load existing users
+	loadUsers()
+
 	// Get bot token from environment variable
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
-		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
+		botToken = "7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84" // Fallback to hardcoded token
+		log.Println("Using hardcoded bot token. Consider setting TELEGRAM_BOT_TOKEN environment variable.")
 	}
 
 	// Set up Telegram bot
