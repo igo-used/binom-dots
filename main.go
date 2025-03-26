@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -24,34 +23,14 @@ type User struct {
 	LastShareReward time.Time `json:"last_share_reward"`
 }
 
-// Get Supabase configuration from environment variables
-func getSupabaseConfig() (string, string) {
-	url := os.Getenv("SUPABASE_URL")
-	if url == "" {
-		url = "https://wzzaxbfdecshddqjfwxs.supabase.co" // Fallback to hardcoded value
-	}
-
-	key := os.Getenv("SUPABASE_KEY")
-	if key == "" {
-		key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6emF4YmZkZWNzaGRkcWpmd3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5NjgwMTEsImV4cCI6MjA1ODU0NDAxMX0.FVhxImKL_DKaP5YAFx7ol9LsqtRSBFI0mKYluBh_6qM" // Fallback to hardcoded value
-	}
-
-	return url, key
-}
-
-// In-memory cache of users to reduce database calls
-var userCache = make(map[int64]*User)
+// Supabase configuration
+const (
+	supabaseURL = "https://wzzaxbfdecshddqjfwxs.supabase.co"
+	supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6emF4YmZkZWNzaGRkcWpmd3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5NjgwMTEsImV4cCI6MjA1ODU0NDAxMX0.FVhxImKL_DKaP5YAFx7ol9LsqtRSBFI0mKYluBh_6qM"
+)
 
 // Get a user from Supabase
 func getUser(userID int64) (*User, error) {
-	// Check cache first
-	if user, exists := userCache[userID]; exists {
-		return user, nil
-	}
-
-	// Get Supabase configuration
-	supabaseURL, supabaseKey := getSupabaseConfig()
-
 	// Prepare the request
 	url := fmt.Sprintf("%s/rest/v1/users?id=eq.%d", supabaseURL, userID)
 	req, err := http.NewRequest("GET", url, nil)
@@ -88,19 +67,11 @@ func getUser(userID int64) (*User, error) {
 		return nil, nil
 	}
 
-	// Cache the user
-	userCache[userID] = users[0]
 	return users[0], nil
 }
 
 // Create or update a user in Supabase
 func saveUser(user *User) error {
-	// Update cache
-	userCache[user.ID] = user
-
-	// Get Supabase configuration
-	supabaseURL, supabaseKey := getSupabaseConfig()
-
 	// Prepare the request
 	url := fmt.Sprintf("%s/rest/v1/users", supabaseURL)
 	userData, err := json.Marshal(user)
@@ -238,65 +209,6 @@ func getUserDots(userID int64) (int, error) {
 	return user.Dots, nil
 }
 
-// Handle Telegram bot messages
-func handleTelegramMessage(bot *tgbotapi.BotAPI, update tgbotapi.Update) {
-	if update.Message == nil {
-		return
-	}
-
-	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-	userID := update.Message.From.ID
-	username := update.Message.From.UserName
-
-	switch update.Message.Text {
-	case "/start":
-		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-			"Earn dots daily and exchange them for tokens later.\n\n" +
-			"Commands:\n" +
-			"/checkin - Get 10 dots daily\n" +
-			"/share - Get 20 dots for sharing\n" +
-			"/balance - Check your dots balance"
-	case "/checkin":
-		if canClaimDaily(userID) {
-			dots, err := awardDailyDots(userID, username)
-			if err != nil {
-				log.Printf("Error awarding daily dots: %v", err)
-				msg.Text = "❌ Error claiming daily reward. Please try again later."
-			} else {
-				msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-			}
-		} else {
-			msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
-		}
-	case "/share":
-		if canClaimShareReward(userID) {
-			dots, err := awardShareDots(userID, username)
-			if err != nil {
-				log.Printf("Error awarding share dots: %v", err)
-				msg.Text = "❌ Error claiming share reward. Please try again later."
-			} else {
-				msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-			}
-		} else {
-			msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
-		}
-	case "/balance":
-		dots, err := getUserDots(userID)
-		if err != nil {
-			log.Printf("Error getting user dots: %v", err)
-			msg.Text = "❌ Error checking balance. Please try again later."
-		} else {
-			msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-		}
-	default:
-		msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-	}
-
-	if _, err := bot.Send(msg); err != nil {
-		log.Println(err)
-	}
-}
-
 func main() {
 	// Get bot token from environment variable
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
@@ -313,60 +225,77 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// First, delete any existing webhook with DropPendingUpdates option
-	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{
-		DropPendingUpdates: true,
-	})
+	// IMPORTANT: Delete any existing webhook first
+	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
 	if err != nil {
 		log.Printf("Error deleting webhook: %v", err)
 	}
 
-	// Get webhook URL from environment variable
-	webhookURL := os.Getenv("WEBHOOK_URL")
-	if webhookURL == "" {
-		log.Fatal("WEBHOOK_URL environment variable is not set")
-	}
+	// Use long polling for updates
+	u := tgbotapi.NewUpdate(0)
+	u.Timeout = 60
+	updates := bot.GetUpdatesChan(u)
 
-	// Parse the webhook URL string into a *url.URL
-	parsedURL, err := url.Parse(webhookURL)
-	if err != nil {
-		log.Printf("Error parsing webhook URL: %v", err)
-		log.Fatal("Invalid webhook URL")
-	}
+	// Start a goroutine to handle Telegram updates
+	go func() {
+		for update := range updates {
+			if update.Message == nil {
+				continue
+			}
 
-	// Set webhook using the correct method with enhanced options
-	webhookConfig := tgbotapi.WebhookConfig{
-		URL:                parsedURL,
-		MaxConnections:     40,
-		DropPendingUpdates: true,
-	}
-	_, err = bot.Request(webhookConfig)
-	if err != nil {
-		log.Printf("Error setting webhook: %v", err)
-	} else {
-		log.Printf("Webhook set to: %s", webhookURL)
-	}
+			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+			userID := update.Message.From.ID
+			username := update.Message.From.UserName
 
-	// Verify webhook was set correctly
-	info, err := bot.GetWebhookInfo()
-	if err != nil {
-		log.Printf("Error getting webhook info: %v", err)
-	} else {
-		log.Printf("Webhook info: URL=%s, PendingUpdates=%d, LastErrorDate=%d, LastErrorMessage=%s",
-			info.URL, info.PendingUpdateCount, info.LastErrorDate, info.LastErrorMessage)
-	}
+			switch update.Message.Text {
+			case "/start":
+				msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+					"Earn dots daily and exchange them for tokens later.\n\n" +
+					"Commands:\n" +
+					"/checkin - Get 10 dots daily\n" +
+					"/share - Get 20 dots for sharing\n" +
+					"/balance - Check your dots balance"
+			case "/checkin":
+				if canClaimDaily(userID) {
+					dots, err := awardDailyDots(userID, username)
+					if err != nil {
+						log.Printf("Error awarding daily dots: %v", err)
+						msg.Text = "❌ Error claiming daily reward. Please try again later."
+					} else {
+						msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+					}
+				} else {
+					msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
+				}
+			case "/share":
+				if canClaimShareReward(userID) {
+					dots, err := awardShareDots(userID, username)
+					if err != nil {
+						log.Printf("Error awarding share dots: %v", err)
+						msg.Text = "❌ Error claiming share reward. Please try again later."
+					} else {
+						msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+					}
+				} else {
+					msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
+				}
+			case "/balance":
+				dots, err := getUserDots(userID)
+				if err != nil {
+					log.Printf("Error getting user dots: %v", err)
+					msg.Text = "❌ Error checking balance. Please try again later."
+				} else {
+					msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+				}
+			default:
+				msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
+			}
 
-	// Set up webhook handler
-	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
-		update, err := bot.HandleUpdate(r)
-		if err != nil {
-			log.Printf("Error handling update: %v", err)
-			return
+			if _, err := bot.Send(msg); err != nil {
+				log.Println(err)
+			}
 		}
-		if update != nil {
-			handleTelegramMessage(bot, *update)
-		}
-	})
+	}()
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
@@ -529,19 +458,8 @@ func main() {
 		}
 	})
 
+	// Add a health check endpoint for Render
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		// Set CORS headers
-		w.Header().Set("Access-Control-Allow-Origin", "*")
-		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
-		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
-
-		// Handle preflight requests
-		if r.Method == "OPTIONS" {
-			w.WriteHeader(http.StatusOK)
-			return
-		}
-
-		// Return a simple OK response
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
 	})
@@ -553,7 +471,7 @@ func main() {
 	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "10000" // Default to 10000 for Render
+		port = "8080"
 	}
 	log.Printf("Starting server on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
