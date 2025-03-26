@@ -313,11 +313,14 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// First, delete any existing webhook
-	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	// First, delete any existing webhook with DropPendingUpdates option
+	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{
+		DropPendingUpdates: true,
+	})
 	if err != nil {
 		log.Printf("Error deleting webhook: %v", err)
 	}
+
 	// Get webhook URL from environment variable
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	if webhookURL == "" {
@@ -331,15 +334,26 @@ func main() {
 		log.Fatal("Invalid webhook URL")
 	}
 
-	// Set webhook using the correct method
+	// Set webhook using the correct method with enhanced options
 	webhookConfig := tgbotapi.WebhookConfig{
-		URL: parsedURL,
+		URL:                parsedURL,
+		MaxConnections:     40,
+		DropPendingUpdates: true,
 	}
 	_, err = bot.Request(webhookConfig)
 	if err != nil {
 		log.Printf("Error setting webhook: %v", err)
 	} else {
 		log.Printf("Webhook set to: %s", webhookURL)
+	}
+
+	// Verify webhook was set correctly
+	info, err := bot.GetWebhookInfo()
+	if err != nil {
+		log.Printf("Error getting webhook info: %v", err)
+	} else {
+		log.Printf("Webhook info: URL=%s, PendingUpdates=%d, LastErrorDate=%d, LastErrorMessage=%s",
+			info.URL, info.PendingUpdateCount, info.LastErrorDate, info.LastErrorMessage)
 	}
 
 	// Set up webhook handler
