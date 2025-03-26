@@ -7,7 +7,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strconv"
 	"time"
@@ -24,11 +23,20 @@ type User struct {
 	LastShareReward time.Time `json:"last_share_reward"`
 }
 
-// Supabase configuration
-const (
-	supabaseURL = "https://wzzaxbfdecshddqjfwxs.supabase.co"
-	supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6emF4YmZkZWNzaGRkcWpmd3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5NjgwMTEsImV4cCI6MjA1ODU0NDAxMX0.FVhxImKL_DKaP5YAFx7ol9LsqtRSBFI0mKYluBh_6qM"
-)
+// Get Supabase configuration from environment variables
+func getSupabaseConfig() (string, string) {
+	url := os.Getenv("SUPABASE_URL")
+	if url == "" {
+		url = "https://wzzaxbfdecshddqjfwxs.supabase.co" // Fallback to hardcoded value
+	}
+
+	key := os.Getenv("SUPABASE_KEY")
+	if key == "" {
+		key = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6emF4YmZkZWNzaGRkcWpmd3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5NjgwMTEsImV4cCI6MjA1ODU0NDAxMX0.FVhxImKL_DKaP5YAFx7ol9LsqtRSBFI0mKYluBh_6qM" // Fallback to hardcoded value
+	}
+
+	return url, key
+}
 
 // In-memory cache of users to reduce database calls
 var userCache = make(map[int64]*User)
@@ -39,6 +47,9 @@ func getUser(userID int64) (*User, error) {
 	if user, exists := userCache[userID]; exists {
 		return user, nil
 	}
+
+	// Get Supabase configuration
+	supabaseURL, supabaseKey := getSupabaseConfig()
 
 	// Prepare the request
 	url := fmt.Sprintf("%s/rest/v1/users?id=eq.%d", supabaseURL, userID)
@@ -85,6 +96,9 @@ func getUser(userID int64) (*User, error) {
 func saveUser(user *User) error {
 	// Update cache
 	userCache[user.ID] = user
+
+	// Get Supabase configuration
+	supabaseURL, supabaseKey := getSupabaseConfig()
 
 	// Prepare the request
 	url := fmt.Sprintf("%s/rest/v1/users", supabaseURL)
@@ -304,50 +318,37 @@ func main() {
 		log.Printf("Error deleting webhook: %v", err)
 	}
 
-	// Get webhook URL from environment variable
-	webhookURL := os.Getenv("WEBHOOK_URL")
-
-	if webhookURL != "" {
-		// Parse the webhook URL string into a *url.URL
-		parsedURL, err := url.Parse(webhookURL)
-		if err != nil {
-			log.Printf("Error parsing webhook URL: %v", err)
-		} else {
-			// Set webhook using the correct method
-			webhookConfig := tgbotapi.WebhookConfig{
-				URL: parsedURL,
-			}
-			_, err = bot.Request(webhookConfig)
-			if err != nil {
-				log.Printf("Error setting webhook: %v", err)
-			} else {
-				log.Printf("Webhook set to: %s", webhookURL)
-
-				// Set up webhook handler
-				http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
-					update, err := bot.HandleUpdate(r)
-					if err != nil {
-						log.Printf("Error handling update: %v", err)
-						return
-					}
-					handleTelegramMessage(bot, *update)
-				})
-			}
-		}
-	} else {
-		// If no webhook URL is provided, use long polling instead
-		log.Println("No webhook URL provided, using long polling")
-		u := tgbotapi.NewUpdate(0)
-		u.Timeout = 60
-		updates := bot.GetUpdatesChan(u)
-
-		// Start a goroutine to handle Telegram updates
-		go func() {
-			for update := range updates {
-				handleTelegramMessage(bot, update)
-			}
-		}()
+	// Get webhook URL
+	webhookURL := os.Getenv("https://binom-dots.onrender.com/bot")
+	if webhookURL == "" {
+		log.Fatal("WEBHOOK_URL environment variable is not set")
 	}
+
+	// Set webhook
+	webhookConfig, err := tgbotapi.NewWebhook(webhookURL)
+	if err != nil {
+		log.Printf("Error creating webhook config: %v", err)
+		log.Fatal("Failed to create webhook configuration")
+	}
+
+	_, err = bot.Request(webhookConfig)
+	if err != nil {
+		log.Printf("Error setting webhook: %v", err)
+	} else {
+		log.Printf("Webhook set to: %s", webhookURL)
+	}
+
+	// Set up webhook handler
+	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
+		update, err := bot.HandleUpdate(r)
+		if err != nil {
+			log.Printf("Error handling update: %v", err)
+			return
+		}
+		if update != nil {
+			handleTelegramMessage(bot, *update)
+		}
+	})
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
@@ -510,6 +511,7 @@ func main() {
 		}
 	})
 
+	// Health check endpoint for Render
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
