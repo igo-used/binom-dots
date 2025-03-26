@@ -71,17 +71,22 @@ func getUser(userID int64) (*User, error) {
 	return users[0], nil
 }
 
-// Create or update a user in Supabase
 func saveUser(user *User) error {
-	// Prepare the request
-	url := fmt.Sprintf("%s/rest/v1/users", supabaseURL)
+	// Log the user data being saved
 	userData, err := json.Marshal(user)
 	if err != nil {
+		log.Printf("Error marshaling user data: %v", err)
 		return err
 	}
+	log.Printf("Saving user data: %s", string(userData))
+
+	// Prepare the request
+	url := fmt.Sprintf("%s/rest/v1/users", supabaseURL)
+	log.Printf("Supabase URL: %s", url)
 
 	req, err := http.NewRequest("POST", url, bytes.NewBuffer(userData))
 	if err != nil {
+		log.Printf("Error creating request: %v", err)
 		return err
 	}
 
@@ -95,9 +100,23 @@ func saveUser(user *User) error {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
+		log.Printf("Error making request: %v", err)
 		return err
 	}
 	defer resp.Body.Close()
+
+	// Read and log the response
+	respBody, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("Error reading response: %v", err)
+	} else {
+		log.Printf("Supabase response: %s", string(respBody))
+	}
+
+	if resp.StatusCode >= 400 {
+		log.Printf("Supabase error: %d %s", resp.StatusCode, resp.Status)
+		return fmt.Errorf("supabase error: %d %s", resp.StatusCode, resp.Status)
+	}
 
 	return nil
 }
