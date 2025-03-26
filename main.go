@@ -223,8 +223,14 @@ func getUserDots(userID int64) (int, error) {
 }
 
 func main() {
+	// Get bot token from environment variable
+	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
+	if botToken == "" {
+		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is not set")
+	}
+
 	// Set up Telegram bot
-	bot, err := tgbotapi.NewBotAPI("7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84")
+	bot, err := tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Panic(err)
 	}
