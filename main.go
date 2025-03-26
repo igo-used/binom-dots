@@ -25,9 +25,9 @@ type User struct {
 }
 
 // Supabase configuration
-const (
-	supabaseURL = "https://wzzaxbfdecshddqjfwxs.supabase.co"
-	supabaseKey = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Ind6emF4YmZkZWNzaGRkcWpmd3hzIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDI5NjgwMTEsImV4cCI6MjA1ODU0NDAxMX0.FVhxImKL_DKaP5YAFx7ol9LsqtRSBFI0mKYluBh_6qM"
+var (
+	supabaseURL = os.Getenv("SUPABASE_URL")
+	supabaseKey = os.Getenv("SUPABASE_KEY")
 )
 
 // Get a user from Supabase
@@ -227,10 +227,9 @@ func main() {
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
 	// Set webhook
-	webhookURLStr := "https://binom-dots.onrender.com/bot"
-	webhookURL, err := url.Parse(webhookURLStr)
-	if err != nil {
-		log.Fatal(err)
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	if webhookURL == "" {
+		webhookURL = "https://binom-dots.onrender.com/bot"
 	}
 
 	// First, delete any existing webhook
@@ -239,21 +238,18 @@ func main() {
 		log.Printf("Error deleting webhook: %v", err)
 	}
 
-	// Then set the new webhook
-	_, err = bot.Request(tgbotapi.WebhookConfig{
-		URL: webhookURL,
-	})
+	// Parse the webhook URL and set it
+	webhookURLParsed, err := url.Parse(webhookURL)
 	if err != nil {
-		log.Fatal(err)
+		log.Printf("Error parsing webhook URL: %v", err)
+	} else {
+		_, err = bot.Request(tgbotapi.WebhookConfig{
+			URL: webhookURLParsed,
+		})
+		if err != nil {
+			log.Printf("Error setting webhook: %v", err)
+		}
 	}
-
-	// Get webhook info
-	info, err := bot.GetWebhookInfo()
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	log.Printf("Webhook set to: %s", info.URL)
 
 	// Add webhook handler
 	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
@@ -491,9 +487,10 @@ func main() {
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
+	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "10000" // Change this to 10000
+		port = "10000" // Match your Render PORT setting
 	}
 	log.Printf("Starting server on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
