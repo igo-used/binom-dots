@@ -225,77 +225,89 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// IMPORTANT: Delete any existing webhook first
-	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	// Set webhook
+	webhookURL := "https://binom-dots.onrender.com/bot"
+	_, err = bot.Request(tgbotapi.WebhookConfig{
+		URL: webhookURL,
+	})
 	if err != nil {
-		log.Printf("Error deleting webhook: %v", err)
+		log.Fatal(err)
 	}
 
-	// Use long polling for updates
-	u := tgbotapi.NewUpdate(0)
-	u.Timeout = 60
-	updates := bot.GetUpdatesChan(u)
+	// Get webhook info
+	info, err := bot.GetWebhookInfo()
+	if err != nil {
+		log.Fatal(err)
+	}
 
-	// Start a goroutine to handle Telegram updates
-	go func() {
-		for update := range updates {
-			if update.Message == nil {
-				continue
-			}
+	log.Printf("Webhook set to: %s", info.URL)
+	log.Printf("Webhook info: URL=%s, PendingUpdates=%d",
+		info.URL, info.PendingUpdateCount)
 
-			msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-			userID := update.Message.From.ID
-			username := update.Message.From.UserName
-
-			switch update.Message.Text {
-			case "/start":
-				msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-					"Earn dots daily and exchange them for tokens later.\n\n" +
-					"Commands:\n" +
-					"/checkin - Get 10 dots daily\n" +
-					"/share - Get 20 dots for sharing\n" +
-					"/balance - Check your dots balance"
-			case "/checkin":
-				if canClaimDaily(userID) {
-					dots, err := awardDailyDots(userID, username)
-					if err != nil {
-						log.Printf("Error awarding daily dots: %v", err)
-						msg.Text = "❌ Error claiming daily reward. Please try again later."
-					} else {
-						msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-					}
-				} else {
-					msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
-				}
-			case "/share":
-				if canClaimShareReward(userID) {
-					dots, err := awardShareDots(userID, username)
-					if err != nil {
-						log.Printf("Error awarding share dots: %v", err)
-						msg.Text = "❌ Error claiming share reward. Please try again later."
-					} else {
-						msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-					}
-				} else {
-					msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
-				}
-			case "/balance":
-				dots, err := getUserDots(userID)
-				if err != nil {
-					log.Printf("Error getting user dots: %v", err)
-					msg.Text = "❌ Error checking balance. Please try again later."
-				} else {
-					msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-				}
-			default:
-				msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-			}
-
-			if _, err := bot.Send(msg); err != nil {
-				log.Println(err)
-			}
+	// Add webhook handler
+	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
+		update, err := bot.HandleUpdate(r)
+		if err != nil {
+			log.Println(err)
+			return
 		}
-	}()
+
+		if update.Message == nil {
+			return
+		}
+
+		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+		userID := update.Message.From.ID
+		username := update.Message.From.UserName
+
+		switch update.Message.Text {
+		case "/start":
+			msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+				"Earn dots daily and exchange them for tokens later.\n\n" +
+				"Commands:\n" +
+				"/checkin - Get 10 dots daily\n" +
+				"/share - Get 20 dots for sharing\n" +
+				"/balance - Check your dots balance"
+		case "/checkin":
+			if canClaimDaily(userID) {
+				dots, err := awardDailyDots(userID, username)
+				if err != nil {
+					log.Printf("Error awarding daily dots: %v", err)
+					msg.Text = "❌ Error claiming daily reward. Please try again later."
+				} else {
+					msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+				}
+			} else {
+				msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
+			}
+		case "/share":
+			if canClaimShareReward(userID) {
+				dots, err := awardShareDots(userID, username)
+				if err != nil {
+					log.Printf("Error awarding share dots: %v", err)
+					msg.Text = "❌ Error claiming share reward. Please try again later."
+				} else {
+					msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+				}
+			} else {
+				msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
+			}
+		case "/balance":
+			dots, err := getUserDots(userID)
+			if err != nil {
+				log.Printf("Error getting user dots: %v", err)
+				msg.Text = "❌ Error checking balance. Please try again later."
+			} else {
+				msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+			}
+		default:
+			msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
+		}
+
+		if _, err := bot.Send(msg); err != nil {
+			log.Println(err)
+		}
+	})
 
 	// API endpoints for the web interface
 	http.HandleFunc("/api/user", func(w http.ResponseWriter, r *http.Request) {
