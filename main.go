@@ -531,8 +531,15 @@ func main() {
 
 	// Health check endpoint for Render
 	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		// Set appropriate headers
+		w.Header().Set("Content-Type", "text/plain")
+
+		// Return a 200 OK status with a simple message
 		w.WriteHeader(http.StatusOK)
 		w.Write([]byte("OK"))
+
+		// Log that the health check was called
+		log.Println("Health check endpoint called")
 	})
 
 	// Serve static files for the web interface
@@ -542,7 +549,7 @@ func main() {
 	// Start the server
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080"
+		port = "10000" // Default to 10000 for Render
 	}
 	log.Printf("Starting server on :%s", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
