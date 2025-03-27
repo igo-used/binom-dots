@@ -6,11 +6,9 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"strconv"
-	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -29,6 +27,7 @@ type User struct {
 var users = make(map[int64]*User)
 var dataFile = "users.json"
 var lastSaveTime = time.Now()
+var bot *tgbotapi.BotAPI
 
 // Load users from the JSON file
 func loadUsers() {
@@ -73,8 +72,8 @@ func saveUsers() {
 		return
 	}
 
-	// Save to GitHub more frequently (every 1 minute instead of 5)
-	if time.Since(lastSaveTime).Minutes() >= 1 {
+	// Only push to GitHub every 5 minutes to avoid too many commits
+	if time.Since(lastSaveTime).Minutes() >= 5 {
 		pushToGitHub()
 		lastSaveTime = time.Now()
 	}
@@ -93,8 +92,6 @@ func pullFromGitHub() {
 
 // Push changes to GitHub
 func pushToGitHub() {
-	log.Printf("Attempting to push data to GitHub...")
-
 	// Add the users.json file
 	addCmd := exec.Command("git", "add", dataFile)
 	output, err := addCmd.CombinedOutput()
@@ -102,21 +99,17 @@ func pushToGitHub() {
 		log.Printf("Error adding file to git: %v - %s", err, output)
 		return
 	}
-	log.Printf("Git add successful")
 
 	// Commit the changes
 	commitCmd := exec.Command("git", "commit", "-m", "Update user data")
 	output, err = commitCmd.CombinedOutput()
 	if err != nil {
-		log.Printf("Git commit output: %s", output)
-		if !strings.Contains(string(output), "nothing to commit") {
-			log.Printf("Error committing changes: %v", err)
-		} else {
-			log.Printf("Nothing to commit - no changes detected")
+		// If nothing to commit, that's fine
+		if string(output) != "nothing to commit, working tree clean" {
+			log.Printf("Error committing changes: %v - %s", err, output)
 		}
 		return
 	}
-	log.Printf("Git commit successful")
 
 	// Push to GitHub
 	pushCmd := exec.Command("git", "push", "origin", "main")
@@ -129,158 +122,129 @@ func pushToGitHub() {
 	log.Printf("Successfully pushed data to GitHub")
 }
 
-// Get a user from the local map
-func getUser(userID int64) (*User, error) {
-	user, exists := users[userID]
-	if !exists {
-		return nil, nil
-	}
-	return user, nil
-}
-
-// Save a user to the local map and trigger JSON save
-func saveUser(user *User) error {
-	// Log the user data being saved
-	userData, err := json.Marshal(user)
-	if err != nil {
-		log.Printf("Error marshaling user data: %v", err)
-		return err
-	}
-	log.Printf("Saving user data: %s", string(userData))
-
-	// Save to the map
-	users[user.ID] = user
-
-	// Save to JSON file
-	saveUsers()
-
-	// Force a GitHub push for important user actions
-	pushToGitHub()
-
-	return nil
-}
-
 // Check if a user can claim daily reward
 func canClaimDaily(userID int64) bool {
-	user, err := getUser(userID)
-	if err != nil || user == nil {
+	user, exists := users[userID]
+	if !exists {
 		return true
 	}
 
-	// Check if it's past 01:00 GMT+1 today
-	now := time.Now().UTC().Add(time.Hour) // GMT+1
-	resetTime := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)
-
-	// If current time is before 01:00, use yesterday's reset time
-	if now.Hour() < 1 {
-		yesterday := now.AddDate(0, 0, -1)
-		resetTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 1, 0, 0, 0, time.UTC)
-	}
-
-	// User can claim if their last check-in was before today's reset time
-	return user.LastCheckIn.Before(resetTime)
+	now := time.Now()
+	return now.Sub(user.LastCheckIn).Hours() >= 24
 }
 
 // Check if a user can claim share reward
 func canClaimShareReward(userID int64) bool {
-	user, err := getUser(userID)
-	if err != nil || user == nil {
+	user, exists := users[userID]
+	if !exists {
 		return true
 	}
 
-	// Check if it's past 01:00 GMT+1 today
-	now := time.Now().UTC().Add(time.Hour) // GMT+1
-	resetTime := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)
-
-	// If current time is before 01:00, use yesterday's reset time
-	if now.Hour() < 1 {
-		yesterday := now.AddDate(0, 0, -1)
-		resetTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 1, 0, 0, 0, time.UTC)
-	}
-
-	// User can claim if their last share reward was before today's reset time
-	return user.LastShareReward.Before(resetTime)
+	now := time.Now()
+	return now.Sub(user.LastShareReward).Hours() >= 24
 }
 
 // Award daily dots to a user
-func awardDailyDots(userID int64, username string) (int, error) {
-	user, err := getUser(userID)
-	if err != nil {
-		return 0, err
-	}
-
-	if user == nil {
-		// Create new user
+func awardDailyDots(userID int64, username string) int {
+	user, exists := users[userID]
+	if !exists {
 		user = &User{
 			ID:       userID,
 			Username: username,
 			Dots:     0,
 		}
+		users[userID] = user
 	}
 
 	user.Dots += 10
 	user.LastCheckIn = time.Now()
-
-	if err := saveUser(user); err != nil {
-		return 0, err
-	}
-
-	return user.Dots, nil
+	saveUsers()
+	return user.Dots
 }
 
 // Award share dots to a user
-func awardShareDots(userID int64, username string) (int, error) {
-	user, err := getUser(userID)
-	if err != nil {
-		return 0, err
-	}
-
-	if user == nil {
-		// Create new user
+func awardShareDots(userID int64, username string) int {
+	user, exists := users[userID]
+	if !exists {
 		user = &User{
 			ID:       userID,
 			Username: username,
 			Dots:     0,
 		}
+		users[userID] = user
 	}
 
 	user.Dots += 20
 	user.LastShareReward = time.Now()
-
-	if err := saveUser(user); err != nil {
-		return 0, err
-	}
-
-	return user.Dots, nil
+	saveUsers()
+	return user.Dots
 }
 
 // Get user dots
-func getUserDots(userID int64) (int, error) {
-	user, err := getUser(userID)
-	if err != nil {
-		return 0, err
+func getUserDots(userID int64) int {
+	user, exists := users[userID]
+	if !exists {
+		return 0
+	}
+	return user.Dots
+}
+
+// Handle Telegram bot commands
+func handleTelegramCommand(update tgbotapi.Update) {
+	if update.Message == nil {
+		return
 	}
 
-	if user == nil {
-		return 0, nil
+	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
+	userID := update.Message.From.ID
+	username := update.Message.From.UserName
+
+	switch update.Message.Text {
+	case "/start":
+		msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
+			"Earn dots daily and exchange them for tokens later.\n\n" +
+			"Commands:\n" +
+			"/checkin - Get 10 dots daily\n" +
+			"/share - Get 20 dots for sharing\n" +
+			"/balance - Check your dots balance"
+	case "/checkin":
+		if canClaimDaily(userID) {
+			dots := awardDailyDots(userID, username)
+			msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
+		} else {
+			msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
+		}
+	case "/share":
+		if canClaimShareReward(userID) {
+			dots := awardShareDots(userID, username)
+			msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
+		} else {
+			msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
+		}
+	case "/balance":
+		dots := getUserDots(userID)
+		msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
+	default:
+		msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
 	}
 
-	return user.Dots, nil
+	if _, err := bot.Send(msg); err != nil {
+		log.Println(err)
+	}
 }
 
 func main() {
 	// Load existing users
 	loadUsers()
 
-	// Get bot token from environment variable
+	// Set up Telegram bot
 	botToken := os.Getenv("TELEGRAM_BOT_TOKEN")
 	if botToken == "" {
-		botToken = "7796841671:AAH9YeNYWzn5ChMAqal_DKYauUBe0nrFa84" // Fallback to hardcoded token
-		log.Println("Using hardcoded bot token. Consider setting TELEGRAM_BOT_TOKEN environment variable.")
+		log.Fatal("TELEGRAM_BOT_TOKEN environment variable is required")
 	}
 
-	// Set up Telegram bot
-	bot, err := tgbotapi.NewBotAPI(botToken)
+	var err error
+	bot, err = tgbotapi.NewBotAPI(botToken)
 	if err != nil {
 		log.Panic(err)
 	}
@@ -288,100 +252,16 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// Set webhook - FIXED: Use proper URL construction
-	webhookURL := os.Getenv("WEBHOOK_URL")
-	if webhookURL == "" {
-		webhookURL = "https://binom-dots.onrender.com/bot"
-	}
-
-	// First, delete any existing webhook
-	deleteConfig := tgbotapi.DeleteWebhookConfig{}
-	resp, err := bot.Request(deleteConfig)
-	if err != nil {
-		log.Printf("Error deleting webhook: %v", err)
-	} else {
-		log.Printf("Endpoint: deleteWebhook, response: %s", resp.Result)
-	}
-
-	// Set the webhook with proper URL parsing
-	webhookConfig := tgbotapi.WebhookConfig{
-		URL: &url.URL{
-			Scheme: "https",
-			Host:   "binom-dots.onrender.com",
-			Path:   "/bot",
-		},
-	}
-	resp, err = bot.Request(webhookConfig)
-	if err != nil {
-		log.Printf("Error setting webhook: %v", err)
-	} else {
-		log.Printf("Endpoint: setWebhook, response: %s", resp.Result)
-	}
-
-	// IMPORTANT: No long polling code here - only use webhook
-
-	// Add webhook handler
+	// Set up webhook handler
 	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
 		update, err := bot.HandleUpdate(r)
 		if err != nil {
-			log.Println(err)
+			log.Printf("Error handling update: %v", err)
 			return
 		}
 
-		if update.Message == nil {
-			return
-		}
-
-		msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
-		userID := update.Message.From.ID
-		username := update.Message.From.UserName
-
-		switch update.Message.Text {
-		case "/start":
-			msg.Text = "Welcome to Dots Rewards! 🎉\n\n" +
-				"Earn dots daily and exchange them for tokens later.\n\n" +
-				"Commands:\n" +
-				"/checkin - Get 10 dots daily\n" +
-				"/share - Get 20 dots for sharing\n" +
-				"/balance - Check your dots balance"
-		case "/checkin":
-			if canClaimDaily(userID) {
-				dots, err := awardDailyDots(userID, username)
-				if err != nil {
-					log.Printf("Error awarding daily dots: %v", err)
-					msg.Text = "❌ Error claiming daily reward. Please try again later."
-				} else {
-					msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
-				}
-			} else {
-				msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
-			}
-		case "/share":
-			if canClaimShareReward(userID) {
-				dots, err := awardShareDots(userID, username)
-				if err != nil {
-					log.Printf("Error awarding share dots: %v", err)
-					msg.Text = "❌ Error claiming share reward. Please try again later."
-				} else {
-					msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
-				}
-			} else {
-				msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
-			}
-		case "/balance":
-			dots, err := getUserDots(userID)
-			if err != nil {
-				log.Printf("Error getting user dots: %v", err)
-				msg.Text = "❌ Error checking balance. Please try again later."
-			} else {
-				msg.Text = fmt.Sprintf("💰 Your current balance: %d dots", dots)
-			}
-		default:
-			msg.Text = "I don't understand that command. Try /start, /checkin, /share, or /balance."
-		}
-
-		if _, err := bot.Send(msg); err != nil {
-			log.Println(err)
+		if update != nil {
+			handleTelegramCommand(*update)
 		}
 	})
 
@@ -410,14 +290,8 @@ func main() {
 			return
 		}
 
-		user, err := getUser(userID)
-		if err != nil {
-			log.Printf("Error getting user: %v", err)
-			http.Error(w, "Error getting user", http.StatusInternalServerError)
-			return
-		}
-
-		if user == nil {
+		user, exists := users[userID]
+		if !exists {
 			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
@@ -451,30 +325,14 @@ func main() {
 			return
 		}
 
-		user, err := getUser(userID)
-		if err != nil {
-			log.Printf("Error getting user: %v", err)
-			http.Error(w, "Error getting user", http.StatusInternalServerError)
+		user, exists := users[userID]
+		if !exists {
+			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
 
-		if user == nil {
-			// Create new user
-			user = &User{
-				ID:       userID,
-				Username: "",
-				Dots:     0,
-			}
-		}
-
 		if canClaimDaily(userID) {
-			dots, err := awardDailyDots(userID, user.Username)
-			if err != nil {
-				log.Printf("Error awarding daily dots: %v", err)
-				http.Error(w, "Error awarding daily dots", http.StatusInternalServerError)
-				return
-			}
-
+			dots := awardDailyDots(userID, user.Username)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
@@ -511,30 +369,14 @@ func main() {
 			return
 		}
 
-		user, err := getUser(userID)
-		if err != nil {
-			log.Printf("Error getting user: %v", err)
-			http.Error(w, "Error getting user", http.StatusInternalServerError)
+		user, exists := users[userID]
+		if !exists {
+			http.Error(w, "User not found", http.StatusNotFound)
 			return
 		}
 
-		if user == nil {
-			// Create new user
-			user = &User{
-				ID:       userID,
-				Username: "",
-				Dots:     0,
-			}
-		}
-
 		if canClaimShareReward(userID) {
-			dots, err := awardShareDots(userID, user.Username)
-			if err != nil {
-				log.Printf("Error awarding share dots: %v", err)
-				http.Error(w, "Error awarding share dots", http.StatusInternalServerError)
-				return
-			}
-
+			dots := awardShareDots(userID, user.Username)
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"success": true,
@@ -546,22 +388,18 @@ func main() {
 		}
 	})
 
-	// Add a health check endpoint for Render
-	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte("OK"))
-	})
-
 	// Serve static files for the web interface
 	fs := http.FileServer(http.Dir("./static"))
 	http.Handle("/", fs)
 
-	// Start the server
+	// Get port from environment variable
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "10000" // Match your Render PORT setting
+		port = "8080" // Default port if not specified
 	}
-	log.Printf("Starting server on :%s", port)
+
+	// Start the server
+	log.Println("Starting server on :" + port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatal(err)
 	}
