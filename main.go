@@ -21,6 +21,9 @@ type User struct {
 	LastCheckIn     time.Time `json:"last_check_in"`
 	Dots            int       `json:"dots"`
 	LastShareReward time.Time `json:"last_share_reward"`
+	FirstSeen       time.Time `json:"first_seen"`     // Track when user first interacted
+	CheckInCount    int       `json:"check_in_count"` // Track total check-ins
+	ShareCount      int       `json:"share_count"`    // Track total shares
 }
 
 // Global map to store users
@@ -128,15 +131,19 @@ func awardDailyDots(userID int64, username string) int {
 	user, exists := users[userID]
 	if !exists {
 		user = &User{
-			ID:       userID,
-			Username: username,
-			Dots:     0,
+			ID:           userID,
+			Username:     username,
+			Dots:         0,
+			FirstSeen:    time.Now(),
+			CheckInCount: 0,
+			ShareCount:   0,
 		}
 		users[userID] = user
 	}
 
 	user.Dots += 10
 	user.LastCheckIn = time.Now()
+	user.CheckInCount++
 	saveUsers()
 	return user.Dots
 }
@@ -146,15 +153,19 @@ func awardShareDots(userID int64, username string) int {
 	user, exists := users[userID]
 	if !exists {
 		user = &User{
-			ID:       userID,
-			Username: username,
-			Dots:     0,
+			ID:           userID,
+			Username:     username,
+			Dots:         0,
+			FirstSeen:    time.Now(),
+			CheckInCount: 0,
+			ShareCount:   0,
 		}
 		users[userID] = user
 	}
 
 	user.Dots += 20
 	user.LastShareReward = time.Now()
+	user.ShareCount++
 	saveUsers()
 	return user.Dots
 }
@@ -177,6 +188,21 @@ func handleTelegramCommand(update tgbotapi.Update) {
 	msg := tgbotapi.NewMessage(update.Message.Chat.ID, "")
 	userID := update.Message.From.ID
 	username := update.Message.From.UserName
+
+	// Create user if they don't exist yet (for any command)
+	// This is the key fix for the connection issue
+	if _, exists := users[userID]; !exists {
+		users[userID] = &User{
+			ID:           userID,
+			Username:     username,
+			Dots:         0,
+			FirstSeen:    time.Now(),
+			CheckInCount: 0,
+			ShareCount:   0,
+		}
+		saveUsers()
+		log.Printf("Created new user: %d (%s)", userID, username)
+	}
 
 	switch update.Message.Text {
 	case "/start":
@@ -339,9 +365,12 @@ func main() {
 		if !exists {
 			// Create new user
 			user = &User{
-				ID:       userID,
-				Username: "",
-				Dots:     0,
+				ID:           userID,
+				Username:     "",
+				Dots:         0,
+				FirstSeen:    time.Now(),
+				CheckInCount: 0,
+				ShareCount:   0,
 			}
 			users[userID] = user
 		}
@@ -388,9 +417,12 @@ func main() {
 		if !exists {
 			// Create new user
 			user = &User{
-				ID:       userID,
-				Username: "",
-				Dots:     0,
+				ID:           userID,
+				Username:     "",
+				Dots:         0,
+				FirstSeen:    time.Now(),
+				CheckInCount: 0,
+				ShareCount:   0,
 			}
 			users[userID] = user
 		}
@@ -406,6 +438,188 @@ func main() {
 		} else {
 			http.Error(w, "Already claimed today", http.StatusBadRequest)
 		}
+	})
+
+	// NEW: Admin endpoints to view user activity
+
+	// 1. View all users
+	http.HandleFunc("/api/admin/users", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Simple admin password protection
+		password := r.URL.Query().Get("password")
+		if password != os.Getenv("ADMIN_PASSWORD") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Convert users map to slice for JSON response
+		userList := make([]*User, 0, len(users))
+		for _, user := range users {
+			userList = append(userList, user)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(userList)
+	})
+
+	// 2. View today's check-ins
+	http.HandleFunc("/api/admin/checkins", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Simple admin password protection
+		password := r.URL.Query().Get("password")
+		if password != os.Getenv("ADMIN_PASSWORD") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Get time filter (default to today)
+		timeFilter := r.URL.Query().Get("period")
+		var since time.Time
+
+		// Calculate the start of today in GMT+1
+		now := time.Now().UTC().Add(time.Hour) // GMT+1
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+		switch timeFilter {
+		case "week":
+			since = today.AddDate(0, 0, -7)
+		case "month":
+			since = today.AddDate(0, -1, 0)
+		case "all":
+			since = time.Time{} // Zero time for all records
+		default:
+			since = today // Default to today
+		}
+
+		// Find users who checked in during the period
+		type CheckInInfo struct {
+			ID           int64     `json:"id"`
+			Username     string    `json:"username"`
+			LastCheckIn  time.Time `json:"last_check_in"`
+			TotalDots    int       `json:"total_dots"`
+			CheckInCount int       `json:"check_in_count"`
+		}
+
+		checkIns := []CheckInInfo{}
+		for _, user := range users {
+			if !user.LastCheckIn.IsZero() && user.LastCheckIn.After(since) {
+				checkIns = append(checkIns, CheckInInfo{
+					ID:           user.ID,
+					Username:     user.Username,
+					LastCheckIn:  user.LastCheckIn,
+					TotalDots:    user.Dots,
+					CheckInCount: user.CheckInCount,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"period":    timeFilter,
+			"count":     len(checkIns),
+			"check_ins": checkIns,
+		})
+	})
+
+	// 3. View today's shares
+	http.HandleFunc("/api/admin/shares", func(w http.ResponseWriter, r *http.Request) {
+		// Set CORS headers
+		w.Header().Set("Access-Control-Allow-Origin", "*")
+		w.Header().Set("Access-Control-Allow-Methods", "GET, OPTIONS")
+		w.Header().Set("Access-Control-Allow-Headers", "Content-Type")
+
+		// Handle preflight requests
+		if r.Method == "OPTIONS" {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		// Simple admin password protection
+		password := r.URL.Query().Get("password")
+		if password != os.Getenv("ADMIN_PASSWORD") {
+			http.Error(w, "Unauthorized", http.StatusUnauthorized)
+			return
+		}
+
+		// Get time filter (default to today)
+		timeFilter := r.URL.Query().Get("period")
+		var since time.Time
+
+		// Calculate the start of today in GMT+1
+		now := time.Now().UTC().Add(time.Hour) // GMT+1
+		today := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, time.UTC)
+
+		switch timeFilter {
+		case "week":
+			since = today.AddDate(0, 0, -7)
+		case "month":
+			since = today.AddDate(0, -1, 0)
+		case "all":
+			since = time.Time{} // Zero time for all records
+		default:
+			since = today // Default to today
+		}
+
+		// Find users who shared during the period
+		type ShareInfo struct {
+			ID         int64     `json:"id"`
+			Username   string    `json:"username"`
+			LastShare  time.Time `json:"last_share"`
+			TotalDots  int       `json:"total_dots"`
+			ShareCount int       `json:"share_count"`
+		}
+
+		shares := []ShareInfo{}
+		for _, user := range users {
+			if !user.LastShareReward.IsZero() && user.LastShareReward.After(since) {
+				shares = append(shares, ShareInfo{
+					ID:         user.ID,
+					Username:   user.Username,
+					LastShare:  user.LastShareReward,
+					TotalDots:  user.Dots,
+					ShareCount: user.ShareCount,
+				})
+			}
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"period": timeFilter,
+			"count":  len(shares),
+			"shares": shares,
+		})
+	})
+
+	// 4. Admin dashboard HTML
+	http.HandleFunc("/admin", func(w http.ResponseWriter, r *http.Request) {
+		// Simple admin password protection
+		password := r.URL.Query().Get("password")
+		if password != os.Getenv("ADMIN_PASSWORD") {
+			http.ServeFile(w, r, "./static/admin-login.html")
+			return
+		}
+
+		http.ServeFile(w, r, "./static/admin.html")
 	})
 
 	// Serve static files for the web interface

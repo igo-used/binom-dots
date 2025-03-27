@@ -1,0 +1,419 @@
+<!-- static/admin.html -->
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Dots Admin Dashboard</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 15px 20px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        h1, h2 {
+            margin: 0;
+        }
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        .stat-card {
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 36px;
+            font-weight: bold;
+            margin: 10px 0;
+            color: #4CAF50;
+        }
+        .tabs {
+            display: flex;
+            margin-bottom: 20px;
+            background-color: white;
+            border-radius: 10px;
+            overflow: hidden;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .tab {
+            padding: 15px 20px;
+            cursor: pointer;
+            flex: 1;
+            text-align: center;
+            border-bottom: 3px solid transparent;
+        }
+        .tab.active {
+            background-color: #f9f9f9;
+            border-bottom: 3px solid #4CAF50;
+            font-weight: bold;
+        }
+        .tab-content {
+            display: none;
+            background-color: white;
+            border-radius: 10px;
+            padding: 20px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.1);
+        }
+        .tab-content.active {
+            display: block;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        th, td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #ddd;
+        }
+        th {
+            background-color: #f2f2f2;
+            font-weight: bold;
+        }
+        tr:hover {
+            background-color: #f9f9f9;
+        }
+        .period-selector {
+            margin-bottom: 20px;
+            display: flex;
+            gap: 10px;
+        }
+        .period-btn {
+            padding: 8px 15px;
+            background-color: #f2f2f2;
+            border: none;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        .period-btn.active {
+            background-color: #4CAF50;
+            color: white;
+        }
+        .loading {
+            text-align: center;
+            padding: 20px;
+            font-style: italic;
+            color: #666;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>Dots Admin Dashboard</h1>
+        <div id="current-time"></div>
+    </header>
+
+    <div class="container">
+        <div class="stats">
+            <div class="stat-card">
+                <h3>Total Users</h3>
+                <div class="stat-value" id="total-users">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Total Dots</h3>
+                <div class="stat-value" id="total-dots">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Today's Check-ins</h3>
+                <div class="stat-value" id="today-checkins">-</div>
+            </div>
+            <div class="stat-card">
+                <h3>Today's Shares</h3>
+                <div class="stat-value" id="today-shares">-</div>
+            </div>
+        </div>
+
+        <div class="tabs">
+            <div class="tab active" data-tab="users">All Users</div>
+            <div class="tab" data-tab="checkins">Check-ins</div>
+            <div class="tab" data-tab="shares">Shares</div>
+        </div>
+
+        <div id="users-tab" class="tab-content  data-tab="shares">Shares</div>
+        </div>
+
+        <div id="users-tab" class="tab-content active">
+            <div class="loading" id="users-loading">Loading users data...</div>
+            <table id="users-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Dots</th>
+                        <th>First Seen</th>
+                        <th>Last Check-in</th>
+                        <th>Last Share</th>
+                        <th>Check-ins</th>
+                        <th>Shares</th>
+                    </tr>
+                </thead>
+                <tbody id="users-tbody"></tbody>
+            </table>
+        </div>
+
+        <div id="checkins-tab" class="tab-content">
+            <div class="period-selector">
+                <button class="period-btn active" data-period="today">Today</button>
+                <button class="period-btn" data-period="week">This Week</button>
+                <button class="period-btn" data-period="month">This Month</button>
+                <button class="period-btn" data-period="all">All Time</button>
+            </div>
+            <div class="loading" id="checkins-loading">Loading check-ins data...</div>
+            <table id="checkins-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Check-in Time</th>
+                        <th>Total Dots</th>
+                        <th>Total Check-ins</th>
+                    </tr>
+                </thead>
+                <tbody id="checkins-tbody"></tbody>
+            </table>
+        </div>
+
+        <div id="shares-tab" class="tab-content">
+            <div class="period-selector">
+                <button class="period-btn active" data-period="today">Today</button>
+                <button class="period-btn" data-period="week">This Week</button>
+                <button class="period-btn" data-period="month">This Month</button>
+                <button class="period-btn" data-period="all">All Time</button>
+            </div>
+            <div class="loading" id="shares-loading">Loading shares data...</div>
+            <table id="shares-table">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>Username</th>
+                        <th>Share Time</th>
+                        <th>Total Dots</th>
+                        <th>Total Shares</th>
+                    </tr>
+                </thead>
+                <tbody id="shares-tbody"></tbody>
+            </table>
+        </div>
+    </div>
+
+    <script>
+        // Get admin password from URL
+        const urlParams = new URLSearchParams(window.location.search);
+        const adminPassword = urlParams.get('password');
+        
+        if (!adminPassword) {
+            window.location.href = '/admin-login.html';
+        }
+
+        // Update current time
+        function updateTime() {
+            const now = new Date();
+            document.getElementById('current-time').textContent = now.toLocaleString();
+        }
+        updateTime();
+        setInterval(updateTime, 1000);
+
+        // Tab switching
+        document.querySelectorAll('.tab').forEach(tab => {
+            tab.addEventListener('click', () => {
+                // Update active tab
+                document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                
+                // Show active content
+                document.querySelectorAll('.tab-content').forEach(content => content.classList.remove('active'));
+                document.getElementById(`${tab.dataset.tab}-tab`).classList.add('active');
+                
+                // Load data for the tab
+                if (tab.dataset.tab === 'users') {
+                    loadUsers();
+                } else if (tab.dataset.tab === 'checkins') {
+                    loadCheckins('today');
+                } else if (tab.dataset.tab === 'shares') {
+                    loadShares('today');
+                }
+            });
+        });
+
+        // Period selector
+        document.querySelectorAll('.period-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                const tabContent = e.target.closest('.tab-content');
+                const period = e.target.dataset.period;
+                
+                // Update active button
+                tabContent.querySelectorAll('.period-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                
+                // Load data for the period
+                if (tabContent.id === 'checkins-tab') {
+                    loadCheckins(period);
+                } else if (tabContent.id === 'shares-tab') {
+                    loadShares(period);
+                }
+            });
+        });
+
+        // Load users data
+        function loadUsers() {
+            document.getElementById('users-loading').style.display = 'block';
+            document.getElementById('users-table').style.display = 'none';
+            
+            fetch(`/api/admin/users?password=${adminPassword}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Unauthorized');
+                    }
+                    return response.json();
+                })
+                .then(users => {
+                    document.getElementById('total-users').textContent = users.length;
+                    
+                    let totalDots = 0;
+                    users.forEach(user => totalDots += user.dots);
+                    document.getElementById('total-dots').textContent = totalDots;
+                    
+                    const tbody = document.getElementById('users-tbody');
+                    tbody.innerHTML = '';
+                    
+                    users.forEach(user => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${user.id}</td>
+                            <td>${user.username || 'N/A'}</td>
+                            <td>${user.dots}</td>
+                            <td>${formatDate(user.first_seen)}</td>
+                            <td>${formatDate(user.last_check_in)}</td>
+                            <td>${formatDate(user.last_share_reward)}</td>
+                            <td>${user.check_in_count}</td>
+                            <td>${user.share_count}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                    
+                    document.getElementById('users-loading').style.display = 'none';
+                    document.getElementById('users-table').style.display = 'table';
+                })
+                .catch(error => {
+                    console.error('Error loading users:', error);
+                    if (error.message === 'Unauthorized') {
+                        window.location.href = '/admin-login.html';
+                    }
+                });
+        }
+
+        // Load check-ins data
+        function loadCheckins(period) {
+            document.getElementById('checkins-loading').style.display = 'block';
+            document.getElementById('checkins-table').style.display = 'none';
+            
+            fetch(`/api/admin/checkins?password=${adminPassword}&period=${period}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Unauthorized');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('today-checkins').textContent = data.count;
+                    
+                    const tbody = document.getElementById('checkins-tbody');
+                    tbody.innerHTML = '';
+                    
+                    data.check_ins.forEach(checkin => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${checkin.id}</td>
+                            <td>${checkin.username || 'N/A'}</td>
+                            <td>${formatDate(checkin.last_check_in)}</td>
+                            <td>${checkin.total_dots}</td>
+                            <td>${checkin.check_in_count}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                    
+                    document.getElementById('checkins-loading').style.display = 'none';
+                    document.getElementById('checkins-table').style.display = 'table';
+                })
+                .catch(error => {
+                    console.error('Error loading check-ins:', error);
+                    if (error.message === 'Unauthorized') {
+                        window.location.href = '/admin-login.html';
+                    }
+                });
+        }
+
+        // Load shares data
+        function loadShares(period) {
+            document.getElementById('shares-loading').style.display = 'block';
+            document.getElementById('shares-table').style.display = 'none';
+            
+            fetch(`/api/admin/shares?password=${adminPassword}&period=${period}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Unauthorized');
+                    }
+                    return response.json();
+                })
+                .then(data => {
+                    document.getElementById('today-shares').textContent = data.count;
+                    
+                    const tbody = document.getElementById('shares-tbody');
+                    tbody.innerHTML = '';
+                    
+                    data.shares.forEach(share => {
+                        const row = document.createElement('tr');
+                        row.innerHTML = `
+                            <td>${share.id}</td>
+                            <td>${share.username || 'N/A'}</td>
+                            <td>${formatDate(share.last_share)}</td>
+                            <td>${share.total_dots}</td>
+                            <td>${share.share_count}</td>
+                        `;
+                        tbody.appendChild(row);
+                    });
+                    
+                    document.getElementById('shares-loading').style.display = 'none';
+                    document.getElementById('shares-table').style.display = 'table';
+                })
+                .catch(error => {
+                    console.error('Error loading shares:', error);
+                    if (error.message === 'Unauthorized') {
+                        window.location.href = '/admin-login.html';
+                    }
+                });
+        }
+
+        // Format date
+        function formatDate(dateString) {
+            if (!dateString || dateString === '0001-01-01T00:00:00Z') {
+                return 'Never';
+            }
+            return new Date(dateString).toLocaleString();
+        }
+
+        // Initial data load
+        loadUsers();
+    </script>
+</body>
+</html>
