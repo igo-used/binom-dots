@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/exec"
 	"strconv"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -72,8 +73,8 @@ func saveUsers() {
 		return
 	}
 
-	// Only push to GitHub every 5 minutes to avoid too many commits
-	if time.Since(lastSaveTime).Minutes() >= 5 {
+	// Save to GitHub more frequently (every 1 minute instead of 5)
+	if time.Since(lastSaveTime).Minutes() >= 1 {
 		pushToGitHub()
 		lastSaveTime = time.Now()
 	}
@@ -92,6 +93,8 @@ func pullFromGitHub() {
 
 // Push changes to GitHub
 func pushToGitHub() {
+	log.Printf("Attempting to push data to GitHub...")
+
 	// Add the users.json file
 	addCmd := exec.Command("git", "add", dataFile)
 	output, err := addCmd.CombinedOutput()
@@ -99,15 +102,21 @@ func pushToGitHub() {
 		log.Printf("Error adding file to git: %v - %s", err, output)
 		return
 	}
+	log.Printf("Git add successful")
 
 	// Commit the changes
 	commitCmd := exec.Command("git", "commit", "-m", "Update user data")
 	output, err = commitCmd.CombinedOutput()
 	if err != nil {
-		// If nothing to commit, that's fine
 		log.Printf("Git commit output: %s", output)
+		if !strings.Contains(string(output), "nothing to commit") {
+			log.Printf("Error committing changes: %v", err)
+		} else {
+			log.Printf("Nothing to commit - no changes detected")
+		}
 		return
 	}
+	log.Printf("Git commit successful")
 
 	// Push to GitHub
 	pushCmd := exec.Command("git", "push", "origin", "main")
@@ -144,6 +153,9 @@ func saveUser(user *User) error {
 
 	// Save to JSON file
 	saveUsers()
+
+	// Force a GitHub push for important user actions
+	pushToGitHub()
 
 	return nil
 }
@@ -276,30 +288,37 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
-	// Set webhook
+	// Set webhook - FIXED: Use proper URL construction
 	webhookURL := os.Getenv("WEBHOOK_URL")
 	if webhookURL == "" {
 		webhookURL = "https://binom-dots.onrender.com/bot"
 	}
 
 	// First, delete any existing webhook
-	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	deleteConfig := tgbotapi.DeleteWebhookConfig{}
+	resp, err := bot.Request(deleteConfig)
 	if err != nil {
 		log.Printf("Error deleting webhook: %v", err)
+	} else {
+		log.Printf("Endpoint: deleteWebhook, response: %s", resp.Result)
 	}
 
-	// Parse the webhook URL and set it
-	webhookURLParsed, err := url.Parse(webhookURL)
-	if err != nil {
-		log.Printf("Error parsing webhook URL: %v", err)
-	} else {
-		_, err = bot.Request(tgbotapi.WebhookConfig{
-			URL: webhookURLParsed,
-		})
-		if err != nil {
-			log.Printf("Error setting webhook: %v", err)
-		}
+	// Set the webhook with proper URL parsing
+	webhookConfig := tgbotapi.WebhookConfig{
+		URL: &url.URL{
+			Scheme: "https",
+			Host:   "binom-dots.onrender.com",
+			Path:   "/bot",
+		},
 	}
+	resp, err = bot.Request(webhookConfig)
+	if err != nil {
+		log.Printf("Error setting webhook: %v", err)
+	} else {
+		log.Printf("Endpoint: setWebhook, response: %s", resp.Result)
+	}
+
+	// IMPORTANT: No long polling code here - only use webhook
 
 	// Add webhook handler
 	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
