@@ -176,7 +176,7 @@ document.addEventListener("DOMContentLoaded", () => {
     button.addEventListener("click", () => {
       const platform = button.getAttribute("data-platform")
       let shareUrl = ""
-      const shareText = "🚀 Don't miss out! Collect Binom Dots now and secure exclusive $BINOM rewards! Join here: https://t.me/BinomChain_bot"
+      const shareText = "💎 EXCLUSIVE: Collect Binom Dots daily and be first to claim $BINOM tokens! Limited opportunity: https://t.me/BinomChain_bot"
 
       // Create share URLs for different platforms
       switch (platform) {
