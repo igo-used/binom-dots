@@ -6,8 +6,8 @@ import (
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
-	"os/exec"
 	"strconv"
 	"time"
 
@@ -25,20 +25,26 @@ type User struct {
 
 // Global map to store users
 var users = make(map[int64]*User)
-var dataFile = "users.json"
-var lastSaveTime = time.Now()
+var dataFile = "/data/users.json" // Using Render's persistent disk
 var bot *tgbotapi.BotAPI
 
 // Load users from the JSON file
 func loadUsers() {
-	// Pull latest changes from GitHub first
-	pullFromGitHub()
+	// Create the /data directory if it doesn't exist
+	os.MkdirAll("/data", 0755)
+
+	// Check if the file exists
+	if _, err := os.Stat(dataFile); os.IsNotExist(err) {
+		// Create an empty users file
+		emptyUsers, _ := json.Marshal([]User{})
+		ioutil.WriteFile(dataFile, emptyUsers, 0644)
+		log.Printf("Created empty users file")
+		return
+	}
 
 	data, err := ioutil.ReadFile(dataFile)
 	if err != nil {
-		if !os.IsNotExist(err) {
-			log.Printf("Error reading users file: %v", err)
-		}
+		log.Printf("Error reading users file: %v", err)
 		return
 	}
 
@@ -54,7 +60,7 @@ func loadUsers() {
 	log.Printf("Loaded %d users", len(users))
 }
 
-// Save users to the JSON file and push to GitHub
+// Save users to the JSON file
 func saveUsers() {
 	userList := make([]*User, 0, len(users))
 	for _, user := range users {
@@ -72,54 +78,7 @@ func saveUsers() {
 		return
 	}
 
-	// Only push to GitHub every 5 minutes to avoid too many commits
-	if time.Since(lastSaveTime).Minutes() >= 5 {
-		pushToGitHub()
-		lastSaveTime = time.Now()
-	}
-}
-
-// Pull the latest data from GitHub
-func pullFromGitHub() {
-	cmd := exec.Command("git", "pull", "origin", "main")
-	output, err := cmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error pulling from GitHub: %v - %s", err, output)
-	} else {
-		log.Printf("Successfully pulled from GitHub: %s", output)
-	}
-}
-
-// Push changes to GitHub
-func pushToGitHub() {
-	// Add the users.json file
-	addCmd := exec.Command("git", "add", dataFile)
-	output, err := addCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error adding file to git: %v - %s", err, output)
-		return
-	}
-
-	// Commit the changes
-	commitCmd := exec.Command("git", "commit", "-m", "Update user data")
-	output, err = commitCmd.CombinedOutput()
-	if err != nil {
-		// If nothing to commit, that's fine
-		if string(output) != "nothing to commit, working tree clean" {
-			log.Printf("Error committing changes: %v - %s", err, output)
-		}
-		return
-	}
-
-	// Push to GitHub
-	pushCmd := exec.Command("git", "push", "origin", "main")
-	output, err = pushCmd.CombinedOutput()
-	if err != nil {
-		log.Printf("Error pushing to GitHub: %v - %s", err, output)
-		return
-	}
-
-	log.Printf("Successfully pushed data to GitHub")
+	log.Printf("Saved %d users to disk", len(users))
 }
 
 // Check if a user can claim daily reward
@@ -129,8 +88,18 @@ func canClaimDaily(userID int64) bool {
 		return true
 	}
 
-	now := time.Now()
-	return now.Sub(user.LastCheckIn).Hours() >= 24
+	// Check if it's past 01:00 GMT+1 today
+	now := time.Now().UTC().Add(time.Hour) // GMT+1
+	resetTime := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)
+
+	// If current time is before 01:00, use yesterday's reset time
+	if now.Hour() < 1 {
+		yesterday := now.AddDate(0, 0, -1)
+		resetTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 1, 0, 0, 0, time.UTC)
+	}
+
+	// User can claim if their last check-in was before today's reset time
+	return user.LastCheckIn.Before(resetTime)
 }
 
 // Check if a user can claim share reward
@@ -140,8 +109,18 @@ func canClaimShareReward(userID int64) bool {
 		return true
 	}
 
-	now := time.Now()
-	return now.Sub(user.LastShareReward).Hours() >= 24
+	// Check if it's past 01:00 GMT+1 today
+	now := time.Now().UTC().Add(time.Hour) // GMT+1
+	resetTime := time.Date(now.Year(), now.Month(), now.Day(), 1, 0, 0, 0, time.UTC)
+
+	// If current time is before 01:00, use yesterday's reset time
+	if now.Hour() < 1 {
+		yesterday := now.AddDate(0, 0, -1)
+		resetTime = time.Date(yesterday.Year(), yesterday.Month(), yesterday.Day(), 1, 0, 0, 0, time.UTC)
+	}
+
+	// User can claim if their last share reward was before today's reset time
+	return user.LastShareReward.Before(resetTime)
 }
 
 // Award daily dots to a user
@@ -212,14 +191,14 @@ func handleTelegramCommand(update tgbotapi.Update) {
 			dots := awardDailyDots(userID, username)
 			msg.Text = fmt.Sprintf("✅ Daily check-in successful! You received 10 dots.\nYour balance: %d dots", dots)
 		} else {
-			msg.Text = "❌ You've already claimed your daily reward. Come back tomorrow!"
+			msg.Text = "❌ You've already claimed your daily reward. Come back after 01:00 GMT+1!"
 		}
 	case "/share":
 		if canClaimShareReward(userID) {
 			dots := awardShareDots(userID, username)
 			msg.Text = fmt.Sprintf("✅ Thanks for sharing! You received 20 dots.\nYour balance: %d dots", dots)
 		} else {
-			msg.Text = "❌ You've already claimed your share reward today. Come back tomorrow!"
+			msg.Text = "❌ You've already claimed your share reward today. Come back after 01:00 GMT+1!"
 		}
 	case "/balance":
 		dots := getUserDots(userID)
@@ -252,6 +231,31 @@ func main() {
 	bot.Debug = true
 	log.Printf("Authorized on account %s", bot.Self.UserName)
 
+	// Set webhook
+	webhookURL := os.Getenv("WEBHOOK_URL")
+	if webhookURL == "" {
+		webhookURL = "https://binom-dots.onrender.com/bot"
+	}
+
+	// First, delete any existing webhook
+	_, err = bot.Request(tgbotapi.DeleteWebhookConfig{})
+	if err != nil {
+		log.Printf("Error deleting webhook: %v", err)
+	}
+
+	// Parse the webhook URL and set it
+	webhookURLParsed, err := url.Parse(webhookURL)
+	if err != nil {
+		log.Printf("Error parsing webhook URL: %v", err)
+	} else {
+		_, err = bot.Request(tgbotapi.WebhookConfig{
+			URL: webhookURLParsed,
+		})
+		if err != nil {
+			log.Printf("Error setting webhook: %v", err)
+		}
+	}
+
 	// Set up webhook handler
 	http.HandleFunc("/bot", func(w http.ResponseWriter, r *http.Request) {
 		update, err := bot.HandleUpdate(r)
@@ -263,6 +267,12 @@ func main() {
 		if update != nil {
 			handleTelegramCommand(*update)
 		}
+	})
+
+	// Add a health check endpoint for Render
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte("OK"))
 	})
 
 	// API endpoints for the web interface
@@ -327,8 +337,13 @@ func main() {
 
 		user, exists := users[userID]
 		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
+			// Create new user
+			user = &User{
+				ID:       userID,
+				Username: "",
+				Dots:     0,
+			}
+			users[userID] = user
 		}
 
 		if canClaimDaily(userID) {
@@ -371,8 +386,13 @@ func main() {
 
 		user, exists := users[userID]
 		if !exists {
-			http.Error(w, "User not found", http.StatusNotFound)
-			return
+			// Create new user
+			user = &User{
+				ID:       userID,
+				Username: "",
+				Dots:     0,
+			}
+			users[userID] = user
 		}
 
 		if canClaimShareReward(userID) {
@@ -395,7 +415,7 @@ func main() {
 	// Get port from environment variable
 	port := os.Getenv("PORT")
 	if port == "" {
-		port = "8080" // Default port if not specified
+		port = "10000" // Default port if not specified
 	}
 
 	// Start the server
